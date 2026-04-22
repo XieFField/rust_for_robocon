@@ -1,2 +1,4 @@
 # rust_for_robocon
 尝试在stm32上使用rust控制robocon机器人，并尝试用rust重构先前的cpp框架
+
+属于是个人的一次尝试，和所归属的学校robocon队伍无关
