@@ -1,0 +1,2 @@
+# rust_for_robocon
+尝试在stm32上使用rust控制robocon机器人，并尝试用rust重构先前的cpp框架
