@@ -1,16 +1,13 @@
 #![no_std]
 #![no_main]
 
-/**
- * 这个示例展示了如何使用 Embassy 框架在 STM32H723ZG 上配置和使用 FDCAN 外设。
- */
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
 use defmt::*; //日志输出
-use embassy_stm32::{pac::sdmmc::regs::Id, peripherals::*}; //导入所有外设
+use embassy_stm32::{ peripherals:: *}; //导入所有外设
 
 // 导入Config 系统配置 和 bind_interrupts 中断绑定 和 can can总线 和 rcc 时钟配置
 use embassy_stm32::{Config, bind_interrupts, can, rcc}; 
@@ -19,8 +16,6 @@ use embassy_stm32::timer;
 // RTT日志输出 + 崩溃自动报错
 use {defmt_rtt as _, panic_probe as _};
 
-
-use core::sync::atomic::{AtomicBool, Ordering};
 use critical_section;
 use embassy_stm32::pac;
 
@@ -30,27 +25,62 @@ bind_interrupts!(struct Irqs {
     FDCAN1_IT1 => can::IT1InterruptHandler<FDCAN1>;
 });
 
-
-static CPU_FREQ_BOOST_ENABLED: critical_section::Mutex<core::cell::Cell<bool>> = 
-    critical_section::Mutex::new(core::cell::Cell::new(false));
-
-
 fn enable_cpu_freq_boost()
 {
-    pac::RCC.apb4enr().modify(|w| w.set_syscfgen(true));
+    unsafe {
+        pac::RCC.apb4enr().modify(|w| w.set_syscfgen(true));
+    
+        let current_boost = pac::SYSCFG.ur18().read().cpu_freq_boost();
+        if current_boost {
+            info!("✅ CPU超频已开启，无需重复配置");
+            return;
+        }
 
-    //修改前完整备份原始锁状态、编程使能状态
-    let orginal_lock_state = pac::FLASH.optcr().read().optlock();
-    let original_opt_pg_state = pac::FLASH.optcr().read().pg_opt();
+        //修改前完整备份 FLASH 选项字节原始锁状态
+        let orginal_lock_state = pac::FLASH.optcr().read().optlock();
+        let original_optstart = pac::FLASH.optcr().read().optstart();
 
+        if orginal_lock_state //解锁选项字节锁
+        {
+            pac::FLASH.optkeyr().write_value(0x08192A3B);
+            pac::FLASH.optkeyr().write_value(0x4C5D6E7F);
+        }
 
-    info!("✅ CPU超频已开启");
+        // 等待FLASH空闲
+        while pac::FLASH.bank(0).sr().read().bsy() {}
+
+        let mut optsr = pac::FLASH.optsr_prg().read();
+        optsr.set_rss2(true); // bit27 = 1 开启CPU超频
+        pac::FLASH.optsr_prg().write_value( optsr);
+
+        pac::FLASH.optcr().modify(| w| w.set_optstart(true)); //触发字节加载
+        while pac::FLASH.optsr_cur().read().opt_busy() {} //等待加载完成
+
+        pac::FLASH.optcr().modify(|w|
+            {
+                w.set_optlock(orginal_lock_state);
+                w.set_optstart(original_optstart);
+            }
+        );
+        
+        while pac::FLASH.bank(0).sr().read().bsy() {}
+
+        info!("✅ CPU超频已开启,将重启生效");
+
+        
+        // 读取UR18做状态验证（只读，硬件自动同步选项字节结果）
+        let boost_state = pac::SYSCFG.ur18().read().cpu_freq_boost();
+        info!("✅ CPU超频选项字节已配置完成,当前Boost状态: {}", boost_state);
+
+        cortex_m::peripheral::SCB::sys_reset(); //软件复位使配置生效
+    }
 }
 
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! 
 {
+    // enable_cpu_freq_boost(); //开启CPU超频功能
     let mut config = Config::default();
 
     //配置外部晶振时钟
