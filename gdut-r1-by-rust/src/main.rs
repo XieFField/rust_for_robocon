@@ -4,32 +4,25 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use {defmt_rtt as _, panic_probe as _};
-use embassy_stm32::usart::{Config as UartConfig, Uart};
+
+use defmt::*; //日志输出
+use embassy_stm32::{pac::sdmmc::regs::Id, peripherals::*}; //导入所有外设
 
 
+// RTT日志输出 + 崩溃自动报错
+use {defmt_rtt as _, panic_probe as _};
 
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! 
 {
-
-    let _p = embassy_stm32::init(Default::default());
+    let mut config = embassy_stm32::Config::default();
+    embassy_stm32::init(config);//初始化芯片
     
-    // let mut config = UartConfig::default();
-    // config.baudrate = 115200;
-    // config.data_bits = embassy_stm32::usart::DataBits::DataBits8;
-    // config.parity = embassy_stm32::usart::Parity::ParityNone;
-
-
-    // let mut uart1 = Uart::new_blocking(
-    //     _p.USART1, _p.PB7, _p.PB6, config
-    // ).unwrap();
-
     loop 
     {
-        // let _ = uart1.blocking_write(b"Hello, world!\r\n");
-        
-        defmt::info!("Blink");
-        Timer::after(Duration::from_millis(100)).await;
+        info!("Hello, world!");
+        Timer::after(Duration::from_secs(1)).await;
     }
+
 }

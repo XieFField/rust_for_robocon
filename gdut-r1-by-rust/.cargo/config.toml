@@ -1,5 +1,6 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "probe-rs run --chip STM32H723ZG"
+# runner = "probe-rs run --probe --protocol swd --speed 1000 --chip STM32H723ZG"
 [build]
 target = "thumbv7em-none-eabihf"
 
