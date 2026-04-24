@@ -19,6 +19,7 @@ async fn main(_spawner: Spawner) -> !
     let mut config = embassy_stm32::Config::default();
     embassy_stm32::init(config);//初始化芯片
     
+        
     loop 
     {
         info!("Hello, world!");
