@@ -1,4 +1,7 @@
 {
   "files.encoding": "utf8",
-  "files.autoGuessEncoding": false
+  "files.autoGuessEncoding": false,
+  "rust-analyzer.linkedProjects": [
+    "gdut-r1-by-rust/Cargo.toml"
+  ]
 }

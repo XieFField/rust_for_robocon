@@ -1,0 +1,2 @@
+[presets]
+vscode_dap = { probe = "1", chip = "STM32H723ZG", speed = 1000, connect-under-reset = true, protocol = "swd" }

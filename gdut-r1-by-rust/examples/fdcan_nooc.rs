@@ -18,7 +18,7 @@ bind_interrupts!(struct Irqs {
 });
 
 #[embassy_executor::main]
-async  fn main(_spawner: Spawner) -> !
+async  fn main(_spawner: Spawner) -> !  
 {
     let mut config = Config::default();
 
@@ -77,7 +77,7 @@ async  fn main(_spawner: Spawner) -> !
 
     unwrap!(_spawner.spawn(can_tx_task(tx)));
     unwrap!(_spawner.spawn(can_rx_task(rx)));
-     
+    
 
     loop {
         Timer::after(Duration::from_secs(1)).await;
@@ -88,7 +88,7 @@ async  fn main(_spawner: Spawner) -> !
 async fn can_tx_task(mut tx: can::CanTx<'static>) -> ! 
 {
     let inv_real_c_2_virtual_c = 16384.0 / 20000.0;
-    let send_current = (1000.0 * inv_real_c_2_virtual_c) as i16;
+    let send_current = (2000.0 * inv_real_c_2_virtual_c) as i16;
 
     let tx_data = [
         (send_current >> 8) as u8,
