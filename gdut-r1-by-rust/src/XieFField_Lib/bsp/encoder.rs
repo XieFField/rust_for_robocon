@@ -1,5 +1,5 @@
-use crate::app::tool::{normalize_deg_0_360, normalize_deg_pm180};
-
+use crate::XieFField_Lib::app::tool::{AngleNormalize};
+use crate::XieFField_Lib::app::tool::{normalize_deg_0_360, normalize_deg_pm180};
 pub struct Encoder{ //基础数据
     angle:f32,          //单圈角度(0..360)
     total_angle:f32,    //连续总累计角度
@@ -19,6 +19,14 @@ pub struct Encoder{ //基础数据
     pending_relocate_total_angle: f32, //重定位时的总角度，重定位后将当前总角度设置为该值
 
 }
+
+impl Default for Encoder{ //默认8192线编码器
+    fn default() -> Self 
+    {
+        Encoder::new(8192)
+    }
+}
+
 
 impl Encoder{
     pub fn new(range: u16) ->Self
@@ -49,7 +57,7 @@ impl Encoder{
     pub fn angle_rad(&self) -> f32{self.angle.to_radians()}
     pub fn total_angle_rad(&self) -> f32{self.total_angle.to_radians()}
 
-    pub fn update(&self, raw_value: u16)
+    pub fn update(&mut self, raw_value: u16)
     {
         let current_angle = raw_value as f32 / self.range as f32 * 360.0;
 
@@ -75,7 +83,7 @@ impl Encoder{
                 self.has_pending_relocate = false;
             }
 
-            is_init = true;
+            self.is_init = true;
 
             return;
         }
@@ -89,8 +97,7 @@ impl Encoder{
 
         let abs_total = self.round_cnt as f32 * 360.0 + current_angle;
         self.total_angle = (abs_total - self.start_angle) + self.precision_offset;
-        self.angle = super::normalize_deg_0_360(self.total_angle);
-        
+        self.angle = normalize_deg_0_360(self.total_angle);
 
         if self.round_cnt.abs() > 5000 
         {
@@ -107,7 +114,7 @@ impl Encoder{
             self.has_pending_relocate = true;
             self.pending_relocate_total_angle = now_total_angle;
             self.total_angle = now_total_angle;
-            self.angle = super::normalize_deg_0_360(self.total_angle);
+            self.angle = normalize_deg_0_360(self.total_angle);
             return;
         }
 
@@ -116,6 +123,6 @@ impl Encoder{
         // 更新偏移量，使得当前计算的总角度调整为目标总角度
         self.precision_offset = now_total_angle - current_calc;
         self.total_angle = now_total_angle; 
-        self.angle = super::normalize_deg_0_360(self.total_angle);
+        self.angle = normalize_deg_0_360(self.total_angle);
     }
 }

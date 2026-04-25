@@ -1,5 +1,5 @@
 # rust_for_robocon
-只是个人的一次尝试，并不是GDUT在robocon赛场上所使用的代码
+只是个人的一次尝试，并不是GDUT在robocon赛场上所使用的代码 -- XieFField
 
 ## 运行本仓库代码需要知道的
 
@@ -12,11 +12,4 @@
     cargo install cargo-generate
 ```
 
-### 运行时候的命令
-```
-    cargo build --release #编译
-    probe-rs download --chip STM32H723ZG target\thumbv7em-none-eabihf\release\gdut-r1-by-rust #下载
-    cargo run --release #也可以运行这一步
-```
-如果你是运行example中的内容
-需要先执行`cargo clean` 再执行example的编译和下载
+我在使用正点原子的DAP-link时候发现，probe-rs会识别出两个调试器，即便他们的id完全相同。选择index0的会烧录不成功，只有选择index1才能烧录成功。但在launch文件中的probe指定索引却无法识别调试器。我索性把那个一模一样的id传进去，便能进去调试模式。

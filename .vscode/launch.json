@@ -4,10 +4,10 @@
     {
       "type": "probe-rs-debug",
       "request": "launch",
-      "name": "debug probe-rs",
+      "name": "debug probe-rs 正点原子",
       "cwd": "${workspaceFolder}",
       "chip": "STM32H723ZG",
-      "speed": 1000,
+      "speed": 10000,
       "probe": "04d8:00df-2:ATK 20190528", //如果使用正点原子的dap的话，需要这一行指认id才能使用
       "flashingConfig": {
         "flashingEnabled": true,
@@ -21,6 +21,28 @@
           //
         }
       ]
+    },
+
+    {
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "debug probe-rs DAP-link",
+      "cwd": "${workspaceFolder}",
+      "chip": "STM32H723ZG",
+      "speed": 10000,
+
+      "flashingConfig": {
+        "fullChipErase": true,
+        "haltAfterReset": true
+      },
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "rttEnabled": true,
+          "programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/gdut-r1-by-rust" //如果你想调试其他程序，改这里就行了
+        }
+      ]
     }
+
   ]
 }

@@ -1,4 +1,4 @@
-use crate::bsp::fdCANbus::CanFrame;
+use crate::XieFField_Lib::bsp::fdCANbus::CanFrame;
 
 pub struct MotorBaseData{ //电机基础数据结构
     pub motor_id: u32,
@@ -79,7 +79,7 @@ pub trait Motor_Base{
     fn reset_control_cnt(&mut self) { self.motor_data_mut().control_cnt = 0; }
     fn reset_control_frequency(&mut self, new_freq: u16) 
     { 
-        if new_freq > 0 && newFreq % 100 == 0 && newfreq <= 1000
+        if new_freq > 0 && new_freq % 100 == 0 && new_freq <= 1000
         {
             self.motor_data_mut().control_frequency = new_freq; 
         }
