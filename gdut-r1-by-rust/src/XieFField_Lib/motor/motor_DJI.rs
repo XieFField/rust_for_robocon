@@ -1,5 +1,7 @@
 #![allow(dead_code)] //允许未使用的代码 
 
+use core::panic;
+
 use super::motor_base::{MotorBaseData, Motor_Base};
 use crate::XieFField_Lib::bsp::fdCANbus::CanFrame;
 use crate::XieFField_Lib::bsp::encoder::{Encoder};
@@ -280,5 +282,46 @@ impl DJI_Group {
                 else { -1 }
             }
         }
+    }
+}
+
+impl Motor_Base for DJI_Group{
+    #[allow(unused_variables)]
+    fn update(&mut self) {}
+    
+    
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize 
+    {
+        if out_frames.is_empty() || self.motor_count == 0 { return 0; }
+        let frame = &mut out_frames[0];
+        *frame = CanFrame::new(self.base_tx_id, false);
+        frame.dlc = 8;
+        for (i, motor_opt) in self.motors.iter().enumerate() 
+        {
+            if let Some(m) = motor_opt 
+            {
+                let current = real_to_raw_current(m.motor_type,m.get_target_current());
+                frame.data[i * 2] = (current >> 8) as u8;
+                frame.data[i * 2 + 1] = current as u8;
+            }
+        }
+
+        1
+    }
+
+    #[allow(unused_variables)]
+    fn update_feedback(&mut self, in_frame: &CanFrame) {}
+
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data_mut(&mut self) -> &mut MotorBaseData 
+    {
+        panic!("[错误]: DJI_Group不可使用base_data_mut接口");
+    }
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data(&self) -> &MotorBaseData 
+    {
+        panic!("[错误]: DJI_Group不可使用base_data接口");
     }
 }

@@ -90,7 +90,8 @@ pub trait Motor_Base{
     //解析函数
     fn update_feedback(&mut self, in_frame: &CanFrame);
 
-    fn match_frame(&self, in_frame: &CanFrame) -> bool; //判断输入的can帧是否是发给这个电机的
+    #[allow(unused_variables)]
+    fn match_frame(&self, in_frame: &CanFrame) -> bool {false} //判断输入的can帧是否是发给这个电机的
 
     fn reset_control_cnt(&mut self) {self.base_data_mut().control_cnt = 0;}
 
