@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub trait Constrain {
     fn constrain(self, min: Self, max: Self) -> Self;
 }

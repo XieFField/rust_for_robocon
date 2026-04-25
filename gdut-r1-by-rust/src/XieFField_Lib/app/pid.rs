@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use embassy_time::{ Instant};
 use crate::XieFField_Lib::app::tool::{Constrain};
 pub struct PID_Param_Config{
@@ -65,21 +67,20 @@ pub struct PID_Incremental{
 
 
 impl PID_Incremental{ //增量式PID
-    pub fn new(pid_incremental: PID_Incremental) -> Self //td_radio如果给0，就表示不开启td
+    pub fn new(param_config: PID_Param_Config,td_radio: f32,dt_default: f32,) -> Self 
     {
-        PID_Incremental
-        {
-            param_config: pid_incremental.param_config,
+        PID_Incremental {
+            param_config,
             output: 0.0,
             last_output: 0.0,
             error: 0.0,
             last_error: 0.0,
             last_last_error: 0.0,
             is_first_calc: true,
-            td_radio: pid_incremental.td_radio,
+            td_radio,
             td_v1: 0.0,
             td_v2: 0.0,
-            dt_default: pid_incremental.dt_default,
+            dt_default,
         }
     }
 
@@ -175,21 +176,24 @@ pub struct PID_Position{
 }
 
 impl PID_Position{//位置式PID
-    pub fn new(pid_position: PID_Position) -> Self
+    pub fn new(
+        param_config: PID_Param_Config,
+        is_circular: bool,  // 角度闭环必开：true
+        I_Separate: f32,    // 积分分离阈值
+        dt_default: f32,) -> Self 
     {
-        PID_Position
-        {
-            param_config: pid_position.param_config,
+        PID_Position {
+            param_config,
             output: 0.0,
             error: 0.0,
             last_error: 0.0,
             feedback_last: 0.0,
-            is_circular: pid_position.is_circular,
+            is_circular,
             is_first_calc: true,
-            last_dt: 0.01,
+            last_dt: dt_default,
             last_time: None,
-            dt_default: 0.01f32, //默认10ms
-            I_Separate: 0.0, //默认不开启积分分离
+            dt_default,
+            I_Separate,
         }
     }
 
@@ -244,7 +248,7 @@ impl PID_Position{//位置式PID
 
         let p_term = self.param_config.kp * self.error;
 
-        let mut i_term = 0.0;
+        let mut i_term:f32;
         if self.error.abs() < self.I_Separate && self.I_Separate > 0.0
         {
             i_term = self.param_config.ki * (self.error + self.last_error) * dt * 0.5; //积分分离，在误差较大时不积分
@@ -266,16 +270,16 @@ impl PID_Position{//位置式PID
         {            
             let mut diff_feedback = feedback - self.feedback_last;
             //处理环形
-            if(diff_feedback > 180.0)
+            if diff_feedback > 180.0
             {
                 diff_feedback -= 360.0;
             }
-            else if(diff_feedback < -180.0)
+            else if diff_feedback < -180.0
             {
                 diff_feedback += 360.0;
             }
 
-            d_term = self.param_config.kd * (diff_feedback) / dt;
+            d_term = self.param_config.kd * diff_feedback / dt;
         }
 
         //update

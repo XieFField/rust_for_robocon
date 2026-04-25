@@ -1,5 +1,7 @@
-use crate::XieFField_Lib::app::tool::{AngleNormalize};
-use crate::XieFField_Lib::app::tool::{normalize_deg_0_360, normalize_deg_pm180};
+#![allow(dead_code)]
+
+// use crate::XieFField_Lib::app::tool::{AngleNormalize};
+use crate::XieFField_Lib::app::tool::{normalize_deg_0_360};
 pub struct Encoder{ //基础数据
     angle:f32,          //单圈角度(0..360)
     total_angle:f32,    //连续总累计角度

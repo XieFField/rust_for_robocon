@@ -31,6 +31,8 @@ cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 critical-section = "1.2.0"
 embassy-stm32 = { version = "0.6", features = ["defmt", "stm32h723zg", "unstable-pac", "memory-x", "time-driver-any" ]  }
 
+
+
 [profile.release]
 debug = 2
 lto = true

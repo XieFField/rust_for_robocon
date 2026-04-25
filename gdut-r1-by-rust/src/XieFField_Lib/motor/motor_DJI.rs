@@ -1,0 +1,284 @@
+#![allow(dead_code)] //允许未使用的代码 
+
+use super::motor_base::{MotorBaseData, Motor_Base};
+use crate::XieFField_Lib::bsp::fdCANbus::CanFrame;
+use crate::XieFField_Lib::bsp::encoder::{Encoder};
+use crate::XieFField_Lib::app::pid::{PID_Incremental,PID_Position,PID_Param_Config};
+use crate::XieFField_Lib::app::tool;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DJI_Motor_Type
+{
+    M3508,
+    M2006,
+    M6020,
+}
+
+const rawtoreal_M3508: f32 = 20000.0 / 16384.0; //电流raw和真实电流(ma)转换系数
+const rawtoreal_M6020: f32 = 3000.0 / 16384.0; //电流raw和真实电流(ma)转换系数
+
+pub fn raw_to_real_current(mttype: DJI_Motor_Type, raw: i16) -> f32
+{
+    match mttype {
+        DJI_Motor_Type::M3508 => raw as f32 * rawtoreal_M3508,
+        DJI_Motor_Type::M2006 => raw as f32 , // 1: 1
+        DJI_Motor_Type::M6020 => raw as f32 * rawtoreal_M6020,
+    }
+}
+
+pub fn real_to_raw_current(mttype: DJI_Motor_Type, real: f32) -> i16
+{
+    match mttype {
+        DJI_Motor_Type::M3508 => (real / rawtoreal_M3508) as i16,
+        DJI_Motor_Type::M2006 => real as i16, // 1: 1
+        DJI_Motor_Type::M6020 => (real / rawtoreal_M6020) as i16,
+    }
+}
+
+const SEND_ID_LOW:u32 = 0x200;
+const SEND_ID_HIGH:u32 = 0x1FF;
+const SEND_ID_6020_LOW:u32 = 0x1FE;
+const SEND_ID_6020_HIGH:u32 = 0x2FE;
+
+pub struct  DJI_Motor {
+    base: MotorBaseData,
+    motor_type: DJI_Motor_Type,
+    encoder: Encoder,
+    pub angle_pid_time_psc: u16,
+    pub angle_pid_time_cnt: u16,
+    calc_total_angle: bool,
+    calc_angle: bool,
+    encoder_raw: u16,
+}
+
+impl DJI_Motor{
+    fn new(motor_id: u32, motor_type: DJI_Motor_Type, gear_ratio: f32, 
+            calc_total_angle: bool, calc_angle: bool) -> Self
+    {
+        if !calc_total_angle && calc_angle
+        {
+            panic!("[定义冲突]: calc_angle若想为true,则calc_total_angle必须为true");
+        }
+
+        DJI_Motor{
+            base: MotorBaseData::new(motor_id, false, gear_ratio),
+            motor_type,
+            encoder: Encoder::new(8192), //假设编码器分辨率为8192，初始位置为0
+            angle_pid_time_psc: 0,
+            angle_pid_time_cnt: 0,
+            calc_total_angle,
+            calc_angle,
+            encoder_raw: 0,
+        }
+    }
+}
+
+impl Motor_Base for DJI_Motor{
+    #[allow(unused_variables)]
+    fn update(&mut self) {}
+    
+    #[allow(unused_variables)]
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {0}
+
+    fn update_feedback(&mut self, in_frame: &CanFrame) 
+    {
+        let data = &in_frame.data;
+
+        let encoder_raw = ((data[0] as u16) << 8) | (data[1] as u16);
+        let rpm_raw = ((data[2] as i16) << 8) | (data[3] as i16);
+        let current_raw = ((data[4] as i16) << 8) | (data[5] as i16);
+        let temperature_raw = data[6] as i8; 
+        
+        //数值转换
+        self.base_data_mut().rpm = rpm_raw as f32 * self.base_data().inv_gear_ratio;
+        self.base_data_mut().current = raw_to_real_current(self.motor_type, current_raw);
+        self.base_data_mut().temperature = temperature_raw as f32;
+
+        if self.calc_total_angle
+        {
+            self.encoder_raw = encoder_raw;
+            self.encoder.update(self.encoder_raw);
+            self.base_data_mut().total_angle = self.encoder.total_angle() * self.base_data().gear_ratio;
+
+            if self.calc_angle
+            {
+                self.base_data_mut().angle = tool::normalize_deg_0_360(self.base_data().total_angle);
+            }
+        }
+    }
+
+    fn match_frame(&self, in_frame: &CanFrame) -> bool 
+    {
+        if in_frame.is_extended
+        {
+            return false; //不处理扩展帧
+        }
+
+        if self.motor_type == DJI_Motor_Type::M6020
+        {
+            if in_frame.id < (0x204 + 1) || in_frame.id > (0x204 + 7)
+            {
+                return false;//非法id
+            }
+            else if in_frame.id == (0x204 + 1) && in_frame.id <= (0x204 + 7)
+            {
+                return true;//匹配成功
+            }
+            else
+            {
+                return false;//不匹配
+            }
+
+        }
+        else if self.motor_type == DJI_Motor_Type::M3508 || self.motor_type == DJI_Motor_Type::M2006
+        {
+            if in_frame.id < (0x200 + 1) || in_frame.id > (0x200 + 7)
+            {
+                return false;//非法id
+            }
+            else if in_frame.id == (0x200 + 1) && in_frame.id <= (0x200 + 7)
+            {
+                return true;//匹配成功
+            }
+            else
+            {
+                return false;//不匹配
+            }
+        }
+        else
+        {
+            return false; //类型匹配失败
+        }
+    }
+
+    fn get_RPM(&self) -> f32 { self.base_data().rpm }
+    fn get_current(&self) -> f32 { self.base_data().current }
+    fn get_angle(&self) -> f32 { self.base_data().angle }
+    fn get_total_angle(&self) -> f32 { self.base_data().total_angle }
+
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data_mut(&mut self) -> &mut MotorBaseData {&mut self.base}
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data(&self) -> &MotorBaseData {&self.base}
+}
+
+
+pub struct  DJI_Group{
+    base_tx_id: u32,
+    motors: [Option<&'static DJI_Motor>; 4],
+    motor_count: u8,
+    contains_gm6020: bool,
+}
+
+impl DJI_Group {
+    fn new(base_tx_id: u32) -> Self 
+    {
+        DJI_Group {
+            base_tx_id,
+            motors: [None, None, None, None],
+            motor_count: 0,
+            contains_gm6020: false,
+        }
+    }
+
+    pub fn add_motor(&mut self, motor:&'static DJI_Motor) -> bool
+    {
+        if self.motor_count >= 4
+        {
+            panic!("[添加失败]: DJI_Group{}已满员，无法添加更多电机", self.base_tx_id);
+        }
+
+        if motor.base_data().motor_id < 1 || motor.base_data().motor_id > 8
+        {
+            panic!("[添加失败]: DJI电机ID {} 不合法,必须在1到8之间", motor.base_data().motor_id);
+        }
+
+        if motor.motor_type == DJI_Motor_Type::M6020
+        {
+            if self.base_tx_id != SEND_ID_6020_LOW && self.base_tx_id != SEND_ID_6020_HIGH
+            {
+                panic!("[添加失败]: DJI M6020电机只能添加到base_tx_id为0x1FE或0x2FE的DJI_Group中");
+            }
+            else if self.base_tx_id == SEND_ID_6020_LOW && !(motor.base_data().motor_id >=1 && motor.base_data().motor_id <= 4)
+            {
+                panic!("[添加失败]: base_tx_id为0x1FE的DJI_Group只能添加ID在1到4之间的M6020电机");
+            }
+            else if self.base_tx_id == SEND_ID_6020_HIGH && !(motor.base_data().motor_id >=5 && motor.base_data().motor_id <= 7)
+            {
+                panic!("[添加失败]: base_tx_id为0x2FE的DJI_Group只能添加ID在5到7之间的M6020电机");
+            }
+        }
+        else if  motor.motor_type == DJI_Motor_Type::M3508 || motor.motor_type == DJI_Motor_Type::M2006
+        {
+            if self.base_tx_id != SEND_ID_LOW && self.base_tx_id != SEND_ID_HIGH
+            {
+                panic!("[添加失败]: DJI M3508/M2006电机只能添加到base_tx_id为0x1FF或0x2FF的DJI_Group中");
+            }
+            else if self.base_tx_id == SEND_ID_LOW && !(motor.base_data().motor_id >=1 && motor.base_data().motor_id <= 4)
+            {
+                panic!("[添加失败]: base_tx_id为0x1FF的DJI_Group只能添加ID在1到4之间的M3508/M2006电机");
+            }
+            else if self.base_tx_id == SEND_ID_HIGH && !(motor.base_data().motor_id >=5 && motor.base_data().motor_id <= 8)
+            {
+                panic!("[添加失败]: base_tx_id为0x2FF的DJI_Group只能添加ID在5到8之间的M3508/M2006电机");
+            }
+        }
+        else 
+        {
+            panic!("[添加失败]: 不支持的DJI电机类型");
+        }
+
+        if self.motor_count == 0
+        {
+            if motor.motor_type == DJI_Motor_Type::M6020
+            {
+                self.contains_gm6020 = true;
+            }
+            else 
+            {
+                self.contains_gm6020 = false;
+            }
+        }
+        else 
+        {
+            if motor.motor_type == DJI_Motor_Type::M6020 && !self.contains_gm6020
+            {
+                panic!("[添加失败]: 已有非M6020电机,无法添加M6020电机");
+            }
+            else if motor.motor_type != DJI_Motor_Type::M6020 && self.contains_gm6020
+            {
+                panic!("[添加失败]: 已有M6020电机,无法添加非M6020电机");
+            }
+        }
+
+        let slot = self.calc_slot(motor.base_data().motor_id, motor.motor_type);
+        if self.motors[slot as usize].is_some() { return false; }//被占用
+
+        if slot < 0 || slot >= 4 {return  false;}
+        
+        self.motors[slot as usize] = Some(motor);
+        self.motor_count = self.motor_count.wrapping_add(1);
+        true
+    }
+
+    fn calc_slot(&self, mid: u32, mtype: DJI_Motor_Type) -> isize 
+    {
+        match mtype 
+        {
+            DJI_Motor_Type::M6020 => 
+            {
+                if self.base_tx_id == SEND_ID_6020_LOW && (1..=4).contains(&mid) { (mid - 1) as isize }
+                else if self.base_tx_id == SEND_ID_6020_HIGH && (5..=7).contains(&mid) { (mid - 5) as isize }
+                else { -1 }
+            }
+            _ => 
+            {
+                if self.base_tx_id == SEND_ID_LOW && (1..=4).contains(&mid) { (mid - 1) as isize }
+                else if self.base_tx_id == SEND_ID_HIGH && (5..=8).contains(&mid) { (mid - 5) as isize }
+                else { -1 }
+            }
+        }
+    }
+}
