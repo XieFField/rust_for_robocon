@@ -325,3 +325,45 @@ impl Motor_Base for DJI_Group{
         panic!("[错误]: DJI_Group不可使用base_data接口");
     }
 }
+
+pub enum DJI_Control_Mode
+{
+    Current,
+    RPM,
+    Angle,
+    TotalAngle,
+}
+
+pub struct M3508{
+    base: DJI_Motor,
+    speed_pid: PID_Incremental,
+    pos_pid: PID_Position,
+    mode: DJI_Control_Mode,
+}
+
+const M3508_GEAR_RATIO: f32 = (3591.0/187.0);
+
+impl M3508 {
+    fn new(motor_id: u32, 
+           calc_total_angle: bool, calc_angle: bool) -> Self
+    {
+        M3508{
+            base: DJI_Motor::new(motor_id, DJI_Motor_Type::M3508, M3508_GEAR_RATIO, calc_total_angle, calc_angle),
+
+            speed_pid: PID_Incremental::new(PID_Param_Config::default(), 0.0, 0.001),
+            pos_pid: PID_Position::new(PID_Param_Config::default(), false, 0.0, 0.01),
+
+            mode: DJI_Control_Mode::Current,
+        }
+    }
+
+    fn set_pos_pid_param(&mut self, param_config: PID_Param_Config)
+    {
+        self.pos_pid.param_config = param_config;
+    }
+
+    fn set_speed_pid_param(&mut self, param_config: PID_Param_Config)
+    {
+        self.speed_pid.param_config = param_config;
+    }
+}
