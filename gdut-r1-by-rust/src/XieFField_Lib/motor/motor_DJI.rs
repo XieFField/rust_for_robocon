@@ -493,13 +493,4 @@ impl Motor_Base for DJI_Group{
 
 
 
-pub struct M3508{
-    base: DJI_Motor,
-    speed_pid: PID_Incremental,
-    pos_pid: PID_Position,
-    mode: DJI_Control_Mode,
-    pos_ctrlcnt: u16,
-}
-
-
 
