@@ -90,6 +90,11 @@ pub trait Motor_Base{
     //解析函数
     fn update_feedback(&mut self, in_frame: &CanFrame);
 
+    // 可选扩展：用于"重定位总角度"等非通用控制命令。
+    // 默认不支持（不做任何事）。
+    #[allow(unused_variables)]
+    fn relocate_total_angle(&mut self, value: f32) {}
+
     #[allow(unused_variables)]
     fn match_frame(&self, in_frame: &CanFrame) -> bool {false} //判断输入的can帧是否是发给这个电机的
 

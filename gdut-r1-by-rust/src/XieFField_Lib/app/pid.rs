@@ -100,7 +100,7 @@ impl PID_Incremental{ //增量式PID
         let mut dt = self.dt_default; //默认1ms
         if let Some(last) = self.param_config.last_time 
         {
-            dt = (now - last).as_secs() as f32;
+            dt = (now - last).as_micros() as f32 / 1_000_000.0; //计算dt，单位秒
         }
         self.param_config.last_time = Some(now);
 
@@ -206,7 +206,7 @@ impl PID_Position{//位置式PID
         
         if let Some(last) = self.param_config.last_time 
         {
-            dt = (now - last).as_secs() as f32;
+            dt = (now - last).as_micros() as f32 / 1_000_000.0;
         }
         self.param_config.last_time = Some(now);
 
@@ -217,6 +217,8 @@ impl PID_Position{//位置式PID
             dt = self.dt_default; //第一次计算，dt用默认值
             self.last_error = target - feedback;
             self.feedback_last = feedback;
+
+            return 0.0; //第一次计算输出0
         }
 
 

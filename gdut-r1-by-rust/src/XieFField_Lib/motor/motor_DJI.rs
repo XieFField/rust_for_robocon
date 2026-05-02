@@ -289,7 +289,6 @@ impl Motor_Base for DJI_Group{
     #[allow(unused_variables)]
     fn update(&mut self) {}
     
-    
     fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize 
     {
         if out_frames.is_empty() || self.motor_count == 0 { return 0; }
@@ -305,7 +304,6 @@ impl Motor_Base for DJI_Group{
                 frame.data[i * 2 + 1] = current as u8;
             }
         }
-
         1
     }
 
@@ -339,9 +337,10 @@ pub struct M3508{
     speed_pid: PID_Incremental,
     pos_pid: PID_Position,
     mode: DJI_Control_Mode,
+    pos_ctrlcnt: u16,
 }
 
-const M3508_GEAR_RATIO: f32 = (3591.0/187.0);
+const M3508_GEAR_RATIO: f32 = 3591.0/187.0; //3508的齿轮比，电机转一圈输出轴转3591/187圈
 
 impl M3508 {
     fn new(motor_id: u32, 
@@ -354,6 +353,7 @@ impl M3508 {
             pos_pid: PID_Position::new(PID_Param_Config::default(), false, 0.0, 0.01),
 
             mode: DJI_Control_Mode::Current,
+            pos_ctrlcnt: 0,
         }
     }
 
@@ -365,5 +365,110 @@ impl M3508 {
     fn set_speed_pid_param(&mut self, param_config: PID_Param_Config)
     {
         self.speed_pid.param_config = param_config;
+    }
+
+    fn reset_motor_gear_ratio(&mut self, new_gear_ratio: f32)
+    {
+        if new_gear_ratio > 0.0
+        {
+            self.base.base_data_mut().gear_ratio = new_gear_ratio;
+            self.base.base_data_mut().inv_gear_ratio = 1.0 / new_gear_ratio;
+        }
+    }
+}
+
+impl Motor_Base for M3508{
+    #[allow(unused_variables)]
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {0}
+
+    fn update_feedback(&mut self, in_frame: &CanFrame) {self.base.update_feedback(in_frame);}
+
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data(&self) -> &MotorBaseData {self.base.base_data()}
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn base_data_mut(&mut self) -> &mut MotorBaseData {self.base.base_data_mut()}
+
+    fn get_RPM(&self) -> f32 {self.base.get_RPM()}
+    fn get_current(&self) -> f32 {self.base.get_current()}
+    fn get_angle(&self) -> f32 {self.base.get_angle()}
+    fn get_total_angle(&self) -> f32 {self.base.get_total_angle()}
+
+    fn set_target_RPM(&mut self, tar_RPM: f32) 
+    {
+        self.mode = DJI_Control_Mode::RPM;
+        self.base.base_data_mut().target_rpm = tar_RPM;
+        self.base.base_data_mut().target_angle = 0.0;
+        self.base.base_data_mut().target_total_angle = 0.0;
+    }
+
+    fn set_target_current(&mut self, tar_current: f32) 
+    {
+        self.mode = DJI_Control_Mode::Current;
+        self.base.base_data_mut().target_current = tar_current;
+        self.base.base_data_mut().target_rpm = 0.0;
+        self.base.base_data_mut().target_angle = 0.0;
+        self.base.base_data_mut().target_total_angle = 0.0;
+    }
+
+    fn set_target_angle(&mut self, tar_angle: f32) 
+    {
+        self.mode = DJI_Control_Mode::Angle;
+        self.base.base_data_mut().target_angle = tar_angle;
+        self.base.base_data_mut().target_rpm = 0.0;
+        self.base.base_data_mut().target_current = 0.0;
+        self.base.base_data_mut().target_total_angle = 0.0;
+    }
+
+    fn set_target_total_angle(&mut self, tar_total_angle: f32) 
+    {
+        self.mode = DJI_Control_Mode::TotalAngle;
+        self.base.base_data_mut().target_total_angle = tar_total_angle;
+        self.base.base_data_mut().target_rpm = 0.0;
+        self.base.base_data_mut().target_current = 0.0;
+        self.base.base_data_mut().target_angle = 0.0;
+    }
+
+    fn update(&mut self) 
+    {
+        self.pos_ctrlcnt = self.pos_ctrlcnt.wrapping_add(1);
+        match self.mode {
+            DJI_Control_Mode::Current => 
+            {
+                //电流控制模式下不需要计算，直接发送目标电流即可
+                return;
+            },
+
+            DJI_Control_Mode::RPM => 
+            {
+                self.base.base_data_mut().target_current = 
+                    self.speed_pid.pid_calc(self.base.get_target_RPM(), self.base.get_RPM());
+            },
+
+            DJI_Control_Mode::Angle => 
+            {
+                if self.pos_ctrlcnt % 10 == 0 // 每10个控制周期更新一次位置PID
+                {
+                    self.base.base_data_mut().target_rpm = 
+                        self.pos_pid.pid_calc(self.base.get_target_angle(), self.base.get_angle());
+                }
+
+                self.base.base_data_mut().target_current = 
+                    self.speed_pid.pid_calc(self.base.base_data().target_rpm, self.base.get_RPM());
+            },
+
+            DJI_Control_Mode::TotalAngle => 
+            {
+                if self.pos_ctrlcnt % 10 == 0 // 每10个控制周期更新一次位置PID
+                {
+                    self.base.base_data_mut().target_rpm = 
+                        self.pos_pid.pid_calc(self.base.get_target_total_angle(), self.base.get_total_angle());
+                    
+                }
+                self.base.base_data_mut().target_current = 
+                        self.speed_pid.pid_calc(self.base.base_data().target_rpm, self.base.get_RPM());
+            },
+        }
     }
 }

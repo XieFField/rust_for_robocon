@@ -1,6 +1,7 @@
 {
   "files.encoding": "utf8",
   "files.autoGuessEncoding": false,
+  "rust-analyzer.server.path": "C:\\Users\\86130\\.cargo\\bin\\rust-analyzer.exe",
   "rust-analyzer.linkedProjects": [
     "gdut-r1-by-rust/Cargo.toml"
   ]

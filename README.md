@@ -1,5 +1,5 @@
 # rust_for_robocon
-只是个人的一次尝试，并不是GDUT在robocon赛场上所使用的代码 -- XieFField
+只是一次尝试，并不是GDUT在robocon2026赛场上所使用的代码 -- XieFField
 
 ## 运行本仓库代码需要知道的
 
