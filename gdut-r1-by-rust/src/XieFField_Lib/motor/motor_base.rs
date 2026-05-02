@@ -1,6 +1,6 @@
 #![allow(dead_code)] //允许未使用的代码 
 
-use crate::XieFField_Lib::bsp::fdCANbus::CanFrame;
+use crate::XieFField_Lib::bsp::bsp_fdCANbus::CanFrame;
 
 pub(crate) struct MotorBaseData{ //电机基础数据结构
     pub motor_id: u32,
@@ -112,6 +112,22 @@ pub trait Motor_Base{
             self.base_data_mut().control_frequency = 1000; //默认值
         }
     }
+
+    fn reset_gear_ratio(&mut self, new_gear_ratio: f32)
+    {
+        if new_gear_ratio > 0.0
+        {
+            self.base_data_mut().gear_ratio = new_gear_ratio;
+            self.base_data_mut().inv_gear_ratio = 1.0 / new_gear_ratio;
+        }
+        else
+        {
+            //不合法的齿轮比，保持原齿轮比不变
+            self.base_data_mut().gear_ratio = 1.0; //默认值
+            self.base_data_mut().inv_gear_ratio = 1.0; //默认值
+        }
+    }
+
     //一些便捷访问
 
     fn get_gear_ratio(&self) -> f32 { self.base_data().gear_ratio }

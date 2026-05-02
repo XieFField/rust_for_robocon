@@ -3,10 +3,15 @@
 use core::panic;
 
 use super::motor_base::{MotorBaseData, Motor_Base};
-use crate::XieFField_Lib::bsp::fdCANbus::CanFrame;
-use crate::XieFField_Lib::bsp::encoder::{Encoder};
-use crate::XieFField_Lib::app::pid::{PID_Incremental,PID_Position,PID_Param_Config};
-use crate::XieFField_Lib::app::tool;
+use crate::XieFField_Lib::bsp::bsp_fdCANbus::CanFrame;
+use crate::XieFField_Lib::bsp::bsp_encoder::{Encoder};
+use crate::XieFField_Lib::app::app_pid::{PID_Incremental,PID_Position,PID_Param_Config};
+use crate::XieFField_Lib::app::app_tool;
+
+/**
+ * @attention: DJI_Motor需要注册到DJI_Group，由DJI_Group进行统一的CAN帧打包和反馈更新
+ */
+
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DJI_Motor_Type
@@ -15,6 +20,16 @@ pub enum DJI_Motor_Type
     M2006,
     M6020,
 }
+
+pub enum DJI_Control_Mode
+{
+    Current,
+    RPM,
+    Angle,
+    TotalAngle,
+}
+
+pub const M3508_GEAR_RATIO: f32 = 3591.0/187.0; //3508的齿轮比，电机转一圈输出轴转3591/187圈
 
 const rawtoreal_M3508: f32 = 20000.0 / 16384.0; //电流raw和真实电流(ma)转换系数
 const rawtoreal_M6020: f32 = 3000.0 / 16384.0; //电流raw和真实电流(ma)转换系数
@@ -37,10 +52,10 @@ pub fn real_to_raw_current(mttype: DJI_Motor_Type, real: f32) -> i16
     }
 }
 
-const SEND_ID_LOW:u32 = 0x200;
-const SEND_ID_HIGH:u32 = 0x1FF;
-const SEND_ID_6020_LOW:u32 = 0x1FE;
-const SEND_ID_6020_HIGH:u32 = 0x2FE;
+pub const SEND_ID_LOW:u32 = 0x200;
+pub const SEND_ID_HIGH:u32 = 0x1FF;
+pub const SEND_ID_6020_LOW:u32 = 0x1FE;
+pub const SEND_ID_6020_HIGH:u32 = 0x2FE;
 
 pub struct  DJI_Motor {
     base: MotorBaseData,
@@ -51,11 +66,16 @@ pub struct  DJI_Motor {
     calc_total_angle: bool,
     calc_angle: bool,
     encoder_raw: u16,
+
+    speed_pid: Option<PID_Incremental>,
+    pos_pid: Option<PID_Position>,
+    control_mode: DJI_Control_Mode,
+    pos_ctrlcnt: Option<u16>,
+    pos_ctrl_freq: Option<u16>,
 }
 
 impl DJI_Motor{
-    fn new(motor_id: u32, motor_type: DJI_Motor_Type, gear_ratio: f32, 
-            calc_total_angle: bool, calc_angle: bool) -> Self
+    pub fn new_m3508(motor_id: u32, calc_total_angle: bool, calc_angle: bool) -> Self
     {
         if !calc_total_angle && calc_angle
         {
@@ -63,24 +83,150 @@ impl DJI_Motor{
         }
 
         DJI_Motor{
-            base: MotorBaseData::new(motor_id, false, gear_ratio),
-            motor_type,
+            base: MotorBaseData::new(motor_id, false, M3508_GEAR_RATIO),
+            motor_type: DJI_Motor_Type::M3508,
             encoder: Encoder::new(8192), //假设编码器分辨率为8192，初始位置为0
             angle_pid_time_psc: 0,
             angle_pid_time_cnt: 0,
             calc_total_angle,
             calc_angle,
             encoder_raw: 0,
+            speed_pid: None,
+            pos_pid: None,
+            control_mode: DJI_Control_Mode::Current,
+            pos_ctrlcnt: None,
+            pos_ctrl_freq: None,
         }
+    }
+
+    pub fn init_speed_pid(&mut self, param_config: PID_Param_Config)
+    {
+        self.speed_pid = Some(PID_Incremental::new(param_config, 0.0, 1.0 / (self.base.control_frequency as f32)));
+    }
+
+    pub fn init_pos_pid(&mut self, param_config: PID_Param_Config, is_circular: bool, I_Separate: f32)
+    {
+        self.pos_pid = Some(PID_Position::new(param_config, is_circular, I_Separate, 1.0 / (self.pos_ctrl_freq.unwrap_or(100) as f32)));
     }
 }
 
 impl Motor_Base for DJI_Motor{
     #[allow(unused_variables)]
-    fn update(&mut self) {}
+    fn update(&mut self) 
+    {
+        if self.speed_pid.is_none() { return; } //没有速度pid，无法进行控制计算
+
+        let freq = self.pos_ctrl_freq.unwrap_or(100);
+        let divider = (1000 / freq).max(1); // 防止除零
+        let mut cnt = self.pos_ctrlcnt.unwrap_or(0);
+        cnt = cnt.wrapping_add(1);
+        let do_pos = cnt % divider == 0;
+        if do_pos { cnt = 0;}
+        self.pos_ctrlcnt = Some(cnt);
+
+        match self.control_mode 
+        {
+            DJI_Control_Mode::Current => {},
+
+            DJI_Control_Mode::RPM => 
+            {
+                let target_rpm = self.base_data().target_rpm;
+                let rpm = self.base_data().rpm;
+
+                self.base_data_mut().target_current = 
+                    self.speed_pid.as_mut().unwrap().pid_calc(target_rpm, rpm);
+            },
+
+            DJI_Control_Mode::Angle =>
+            {
+                if do_pos
+                {
+                    let target_angle = self.base_data().target_angle;
+                    let angle = self.base_data().angle;
+                    self.base_data_mut().target_rpm = 
+                        self.pos_pid.as_mut().unwrap().pid_calc(target_angle, angle);
+                }
+                let target_rpm = self.base_data().target_rpm;
+                let rpm = self.base_data().rpm;
+                self.base_data_mut().target_current = 
+                    self.speed_pid.as_mut().unwrap().pid_calc(target_rpm, rpm);
+            }
+
+            DJI_Control_Mode::TotalAngle =>
+            {
+                if do_pos
+                {
+                    let target_total_angle = self.base_data().target_total_angle;
+                    let total_angle = self.base_data().total_angle;
+                    self.base_data_mut().target_rpm = 
+                        self.pos_pid.as_mut().unwrap().pid_calc(target_total_angle, total_angle);
+                }
+                let target_rpm = self.base_data().target_rpm;
+                let rpm = self.base_data().rpm;
+                self.base_data_mut().target_current = 
+                    self.speed_pid.as_mut().unwrap().pid_calc(target_rpm, rpm);
+            }
+        }
+    }
     
+    fn set_target_current(&mut self, tar_current: f32) 
+    {
+        self.control_mode = DJI_Control_Mode::Current;
+        self.base_data_mut().target_current = tar_current;
+        self.base_data_mut().target_rpm = 0.0;
+        self.base_data_mut().target_angle = 0.0;
+        self.base_data_mut().target_total_angle = 0.0;    
+    }
+
+    fn set_target_RPM(&mut self, tar_RPM: f32) 
+    {
+        if self.speed_pid.is_none()
+        {
+            panic!("[错误]: speed_pid未初始化,无法使用set_target_RPM接口");
+        }
+
+        self.control_mode = DJI_Control_Mode::RPM;
+        self.base_data_mut().target_rpm = tar_RPM;
+        self.base_data_mut().target_angle = 0.0;
+        self.base_data_mut().target_total_angle = 0.0;
+    }
+
+    fn set_target_angle(&mut self, tar_angle: f32) 
+    {
+        if self.pos_pid.is_none()
+        {
+            panic!("[错误]: pos_pid未初始化,无法使用set_target_angle接口");
+        }
+
+        if !self.calc_angle || !self.calc_total_angle
+        {
+            panic!("[错误]: calc_angle和calc_total_angle必须至少有一个为true,才能使用set_target_angle接口");
+        }
+
+        self.control_mode = DJI_Control_Mode::Angle;
+        self.base_data_mut().target_angle = tar_angle;
+        self.base_data_mut().target_total_angle = 0.0;
+    }
+
+    fn set_target_total_angle(&mut self, tar_total_angle: f32) 
+    {
+        if self.pos_pid.is_none()
+        {
+            panic!("[错误]: pos_pid未初始化,无法使用set_target_total_angle接口");
+        }
+
+        if !self.calc_total_angle
+        {
+            panic!("[错误]: calc_total_angle必须为true,才能使用set_target_total_angle接口");
+        }
+
+        self.control_mode = DJI_Control_Mode::TotalAngle;
+        self.base_data_mut().target_total_angle = tar_total_angle;
+        self.base_data_mut().target_angle = 0.0;    
+    }
+
     #[allow(unused_variables)]
-    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {0}
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {0} //交给DJI_Group统一打包
 
     fn update_feedback(&mut self, in_frame: &CanFrame) 
     {
@@ -104,7 +250,7 @@ impl Motor_Base for DJI_Motor{
 
             if self.calc_angle
             {
-                self.base_data_mut().angle = tool::normalize_deg_0_360(self.base_data().total_angle);
+                self.base_data_mut().angle = app_tool::normalize_deg_0_360(self.base_data().total_angle);
             }
         }
     }
@@ -164,18 +310,19 @@ impl Motor_Base for DJI_Motor{
     #[doc(hidden)]
     #[allow(private_interfaces)]
     fn base_data(&self) -> &MotorBaseData {&self.base}
+
 }
 
 
 pub struct  DJI_Group{
     base_tx_id: u32,
-    motors: [Option<&'static DJI_Motor>; 4],
+    motors: [Option< DJI_Motor>; 4],
     motor_count: u8,
     contains_gm6020: bool,
 }
 
 impl DJI_Group {
-    fn new(base_tx_id: u32) -> Self 
+    pub fn new(base_tx_id: u32) -> Self
     {
         DJI_Group {
             base_tx_id,
@@ -185,7 +332,7 @@ impl DJI_Group {
         }
     }
 
-    pub fn add_motor(&mut self, motor:&'static DJI_Motor) -> bool
+    pub fn add_motor(&mut self, motor: DJI_Motor) -> bool
     {
         if self.motor_count >= 4
         {
@@ -256,9 +403,9 @@ impl DJI_Group {
         }
 
         let slot = self.calc_slot(motor.base_data().motor_id, motor.motor_type);
-        if self.motors[slot as usize].is_some() { return false; }//被占用
+        if slot < 0 || slot >= 4 { return false; }
 
-        if slot < 0 || slot >= 4 {return  false;}
+        if self.motors[slot as usize].is_some() { return false; }//被占用
         
         self.motors[slot as usize] = Some(motor);
         self.motor_count = self.motor_count.wrapping_add(1);
@@ -287,7 +434,13 @@ impl DJI_Group {
 
 impl Motor_Base for DJI_Group{
     #[allow(unused_variables)]
-    fn update(&mut self) {}
+    fn update(&mut self) 
+    {
+        for motor in self.motors.iter_mut().flatten()
+        {
+            motor.update();
+        }
+    }
     
     fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize 
     {
@@ -307,8 +460,22 @@ impl Motor_Base for DJI_Group{
         1
     }
 
+    fn match_frame(&self, in_frame: &CanFrame) -> bool 
+    {
+        self.motors.iter().flatten().any(|m| m.match_frame(in_frame))    
+    }
+
     #[allow(unused_variables)]
-    fn update_feedback(&mut self, in_frame: &CanFrame) {}
+    fn update_feedback(&mut self, in_frame: &CanFrame) 
+    {
+        for motor in self.motors.iter_mut().flatten()
+        {
+            if motor.match_frame(in_frame)
+            {
+                motor.update_feedback(in_frame);
+            }
+        }
+    }
 
     #[doc(hidden)]
     #[allow(private_interfaces)]
@@ -324,13 +491,7 @@ impl Motor_Base for DJI_Group{
     }
 }
 
-pub enum DJI_Control_Mode
-{
-    Current,
-    RPM,
-    Angle,
-    TotalAngle,
-}
+
 
 pub struct M3508{
     base: DJI_Motor,
@@ -340,135 +501,5 @@ pub struct M3508{
     pos_ctrlcnt: u16,
 }
 
-const M3508_GEAR_RATIO: f32 = 3591.0/187.0; //3508的齿轮比，电机转一圈输出轴转3591/187圈
 
-impl M3508 {
-    fn new(motor_id: u32, 
-           calc_total_angle: bool, calc_angle: bool) -> Self
-    {
-        M3508{
-            base: DJI_Motor::new(motor_id, DJI_Motor_Type::M3508, M3508_GEAR_RATIO, calc_total_angle, calc_angle),
 
-            speed_pid: PID_Incremental::new(PID_Param_Config::default(), 0.0, 0.001),
-            pos_pid: PID_Position::new(PID_Param_Config::default(), false, 0.0, 0.01),
-
-            mode: DJI_Control_Mode::Current,
-            pos_ctrlcnt: 0,
-        }
-    }
-
-    fn set_pos_pid_param(&mut self, param_config: PID_Param_Config)
-    {
-        self.pos_pid.param_config = param_config;
-    }
-
-    fn set_speed_pid_param(&mut self, param_config: PID_Param_Config)
-    {
-        self.speed_pid.param_config = param_config;
-    }
-
-    fn reset_motor_gear_ratio(&mut self, new_gear_ratio: f32)
-    {
-        if new_gear_ratio > 0.0
-        {
-            self.base.base_data_mut().gear_ratio = new_gear_ratio;
-            self.base.base_data_mut().inv_gear_ratio = 1.0 / new_gear_ratio;
-        }
-    }
-}
-
-impl Motor_Base for M3508{
-    #[allow(unused_variables)]
-    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {0}
-
-    fn update_feedback(&mut self, in_frame: &CanFrame) {self.base.update_feedback(in_frame);}
-
-    #[doc(hidden)]
-    #[allow(private_interfaces)]
-    fn base_data(&self) -> &MotorBaseData {self.base.base_data()}
-    #[doc(hidden)]
-    #[allow(private_interfaces)]
-    fn base_data_mut(&mut self) -> &mut MotorBaseData {self.base.base_data_mut()}
-
-    fn get_RPM(&self) -> f32 {self.base.get_RPM()}
-    fn get_current(&self) -> f32 {self.base.get_current()}
-    fn get_angle(&self) -> f32 {self.base.get_angle()}
-    fn get_total_angle(&self) -> f32 {self.base.get_total_angle()}
-
-    fn set_target_RPM(&mut self, tar_RPM: f32) 
-    {
-        self.mode = DJI_Control_Mode::RPM;
-        self.base.base_data_mut().target_rpm = tar_RPM;
-        self.base.base_data_mut().target_angle = 0.0;
-        self.base.base_data_mut().target_total_angle = 0.0;
-    }
-
-    fn set_target_current(&mut self, tar_current: f32) 
-    {
-        self.mode = DJI_Control_Mode::Current;
-        self.base.base_data_mut().target_current = tar_current;
-        self.base.base_data_mut().target_rpm = 0.0;
-        self.base.base_data_mut().target_angle = 0.0;
-        self.base.base_data_mut().target_total_angle = 0.0;
-    }
-
-    fn set_target_angle(&mut self, tar_angle: f32) 
-    {
-        self.mode = DJI_Control_Mode::Angle;
-        self.base.base_data_mut().target_angle = tar_angle;
-        self.base.base_data_mut().target_rpm = 0.0;
-        self.base.base_data_mut().target_current = 0.0;
-        self.base.base_data_mut().target_total_angle = 0.0;
-    }
-
-    fn set_target_total_angle(&mut self, tar_total_angle: f32) 
-    {
-        self.mode = DJI_Control_Mode::TotalAngle;
-        self.base.base_data_mut().target_total_angle = tar_total_angle;
-        self.base.base_data_mut().target_rpm = 0.0;
-        self.base.base_data_mut().target_current = 0.0;
-        self.base.base_data_mut().target_angle = 0.0;
-    }
-
-    fn update(&mut self) 
-    {
-        self.pos_ctrlcnt = self.pos_ctrlcnt.wrapping_add(1);
-        match self.mode {
-            DJI_Control_Mode::Current => 
-            {
-                //电流控制模式下不需要计算，直接发送目标电流即可
-                return;
-            },
-
-            DJI_Control_Mode::RPM => 
-            {
-                self.base.base_data_mut().target_current = 
-                    self.speed_pid.pid_calc(self.base.get_target_RPM(), self.base.get_RPM());
-            },
-
-            DJI_Control_Mode::Angle => 
-            {
-                if self.pos_ctrlcnt % 10 == 0 // 每10个控制周期更新一次位置PID
-                {
-                    self.base.base_data_mut().target_rpm = 
-                        self.pos_pid.pid_calc(self.base.get_target_angle(), self.base.get_angle());
-                }
-
-                self.base.base_data_mut().target_current = 
-                    self.speed_pid.pid_calc(self.base.base_data().target_rpm, self.base.get_RPM());
-            },
-
-            DJI_Control_Mode::TotalAngle => 
-            {
-                if self.pos_ctrlcnt % 10 == 0 // 每10个控制周期更新一次位置PID
-                {
-                    self.base.base_data_mut().target_rpm = 
-                        self.pos_pid.pid_calc(self.base.get_target_total_angle(), self.base.get_total_angle());
-                    
-                }
-                self.base.base_data_mut().target_current = 
-                        self.speed_pid.pid_calc(self.base.base_data().target_rpm, self.base.get_RPM());
-            },
-        }
-    }
-}

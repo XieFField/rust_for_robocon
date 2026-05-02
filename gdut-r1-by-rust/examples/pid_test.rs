@@ -8,8 +8,8 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use embassy_stm32::{pac::sdmmc::regs::Id, peripherals::*}; //导入所有外设
 
-use gdut_r1_by_rust::XieFField_Lib::app::pid::{self, PID_Incremental, PID_Param_Config};
-use gdut_r1_by_rust::XieFField_Lib::app::pid::PID_Position;
+use gdut_r1_by_rust::XieFField_Lib::app::app_pid::{self, PID_Incremental, PID_Param_Config};
+use gdut_r1_by_rust::XieFField_Lib::app::app_pid::PID_Position;
 use {defmt_rtt as _, panic_probe as _};
 use defmt::*; //日志输出
 

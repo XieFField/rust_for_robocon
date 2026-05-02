@@ -41,14 +41,14 @@ pub enum CommonCmd {
 }
 
 #[derive(Clone, Copy)]
-pub enum DjiCmd {
+pub enum DJICmd {
     RelocateTotalAngle { motor_id: u32, value: f32 },
 }
 
 #[derive(Clone, Copy)]
 pub enum BusCmd {
     Common(CommonCmd),
-    Dji(DjiCmd),
+    DJI(DJICmd),
 }
 
 #[derive(Clone, Copy)]
@@ -107,10 +107,10 @@ impl MotorHandle {
             .await;
     }
 
-    pub async fn dji_relocate_total_angle(&self, value: f32) 
+    pub async fn DJI_relocate_total_angle(&self, value: f32) 
     {
         self.cmd_ch
-            .send(BusCmd::Dji(DjiCmd::RelocateTotalAngle {
+            .send(BusCmd::DJI(DJICmd::RelocateTotalAngle {
                 motor_id: self.motor_id,
                 value,
             }))
@@ -185,10 +185,11 @@ pub async fn fdcan_bus_actor_task(
     let mut frames_to_send: [CanFrame; TX_FRAME_BUF_LEN] = [CanFrame::new(0, false); TX_FRAME_BUF_LEN];
 
     loop {
-        // 等待三类事件：
-        // 1) 到 1ms 控制点
-        // 2) 收到 CAN 帧（收到即解析）
-        // 3) 收到外部命令（设置目标值/重定位等）
+        
+        // 三类事件等待
+        // 1. 1ms更新控制节点
+        // 2. 收到CAN帧，立即解析更新电机状态
+        // 3. 收到外部命令，立即修改电机目标/状态
         let tick_fut = Timer::at(next);
         let rx_fut = rx.read();
         let cmd_fut = cmd_ch.receive();
@@ -202,7 +203,8 @@ pub async fn fdcan_bus_actor_task(
 
         match event 
         {
-            embassy_futures::select::Either::First(inner) => match inner 
+            embassy_futures::select::Either::First(inner) =>
+            match inner 
             {
                 embassy_futures::select::Either::First(_) => 
                 {
@@ -210,7 +212,7 @@ pub async fn fdcan_bus_actor_task(
                     next += period;
                     while Instant::now() > next {next += period;}
 
-                    // 1) update（与你 C++ 第一段一致）
+                    // update
                     for slot in bus.motors.iter_mut() 
                     {
                         if let Some(m_ref) = slot.as_mut() 
@@ -218,49 +220,31 @@ pub async fn fdcan_bus_actor_task(
                             let motor: &mut dyn Motor_Base = &mut **m_ref;
 
                             let freq = motor.get_control_frequency();
-                            let divider: u16 = if freq == 0 
-                            {
-                                1
-                            } 
-                            else 
-                            {
-                                (DEFAULT_CONTROL_HZ / freq).max(1)
-                            };
+                            let divider: u16 = if freq == 0 { 1 } 
+                            else { (DEFAULT_CONTROL_HZ / freq).max(1) };
 
-                            if motor.get_control_cnt().wrapping_add(1) >= divider 
-                            {
-                                motor.update();
-                            }
+                            if motor.get_control_cnt().wrapping_add(1) >= divider { motor.update(); }
                         }
                     }
 
-                    // 2) pack（与你 C++ 第二段一致）
+                    // pack_command 
                     let mut frame_cnt: usize = 0;
                     for slot in bus.motors.iter_mut() 
                     {
-                        if frame_cnt >= frames_to_send.len() { break; } // 发送缓存已满，跳过剩余电机（极端情况）
+                        if frame_cnt >= frames_to_send.len() { break; } // 发送缓存已满，跳过剩余电机
 
                         let Some(m_ref) = slot.as_mut() else { continue };
+
                         let motor: &mut dyn Motor_Base = &mut **m_ref;
 
                         let freq = motor.get_control_frequency();
-                        let divider: u16 = if freq == 0 
-                        {
-                            1
-                        } 
-                        else 
-                        {
-                            (DEFAULT_CONTROL_HZ / freq).max(1)
-                        };
+                        let divider: u16 = 
+                            if freq == 0 { 1 } 
+                            else { (DEFAULT_CONTROL_HZ / freq).max(1) };
 
-                        let due = if freq == DEFAULT_CONTROL_HZ 
-                        {
-                            true
-                        } 
-                        else 
-                        {
-                            motor.get_control_cnt().wrapping_add(1) >= divider
-                        };
+                        let due = 
+                            if freq == DEFAULT_CONTROL_HZ { true } 
+                            else  { motor.get_control_cnt().wrapping_add(1) >= divider };
 
                         if !due 
                         {
@@ -273,26 +257,21 @@ pub async fn fdcan_bus_actor_task(
                         motor.reset_control_cnt();
                     }
 
-                    // 3) send（await 发生在这里，但不持有 motor 的可变借用）
+                    // send
                     for i in 0..frame_cnt 
                     {
                         let f = &frames_to_send[i];
                         let len = (f.dlc as usize).min(8);
                         let payload = &f.data[..len];
 
-                        let out = if f.is_extended 
-                        {
-                            can::Frame::new_extended(f.id, payload).unwrap()
-                        } 
-                        else 
-                        {
-                            can::Frame::new_standard(f.id as u16, payload).unwrap()
-                        };
+                        let out = 
+                            if f.is_extended { can::Frame::new_extended(f.id, payload).unwrap() } 
+                            else { can::Frame::new_standard(f.id as u16, payload).unwrap() };
 
                         let _ = tx.write(&out).await;
                     }
 
-                    // 清空发送缓存（避免下一轮误用旧数据）
+                    // 清空发送缓存
                     for f in frames_to_send.iter_mut() 
                     {
                         *f = CanFrame::new(0, false);
@@ -312,10 +291,7 @@ pub async fn fdcan_bus_actor_task(
                             if let Some(m_ref) = slot.as_mut() 
                             {
                                 let motor: &mut dyn Motor_Base = &mut **m_ref;
-                                if motor.match_frame(&frame) 
-                                {
-                                    motor.update_feedback(&frame);
-                                }
+                                if motor.match_frame(&frame) { motor.update_feedback(&frame); }
                             }
                         }
                     }
@@ -324,7 +300,7 @@ pub async fn fdcan_bus_actor_task(
 
             embassy_futures::select::Either::Second(cmd) => 
             {
-                // 外部命令：只修改电机目标/状态，不直接 await 发送（保持 tick 稳定）
+                //只修改电机目标/状态，不操作await，保证tick和rx的及时响应
                 apply_bus_cmd(&mut bus.motors, cmd);
             }
         }
@@ -335,7 +311,7 @@ fn apply_bus_cmd(motors: &mut [Option<&'static mut dyn Motor_Base>; MAX_MOTORS],
 {
     match cmd {
         BusCmd::Common(c) => apply_common_cmd(motors, c),
-        BusCmd::Dji(d) => apply_dji_cmd(motors, d),
+        BusCmd::DJI(d) => apply_DJI_cmd(motors, d),
     }
 }
 
@@ -365,11 +341,11 @@ fn apply_common_cmd(motors: &mut [Option<&'static mut dyn Motor_Base>; MAX_MOTOR
     }
 }
 
-fn apply_dji_cmd(motors: &mut [Option<&'static mut dyn Motor_Base>; MAX_MOTORS], cmd: DjiCmd) 
+fn apply_DJI_cmd(motors: &mut [Option<&'static mut dyn Motor_Base>; MAX_MOTORS], cmd: DJICmd) 
 {
     match cmd 
     {
-        DjiCmd::RelocateTotalAngle { motor_id, value } => 
+        DJICmd::RelocateTotalAngle { motor_id, value } => 
         {
             with_motor_by_id(motors, motor_id, |m| m.relocate_total_angle(value));
         }
