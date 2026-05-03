@@ -29,8 +29,8 @@ impl CanFrame {
 
 pub(crate) const MAX_MOTORS: usize = 10;
 pub(crate) const DEFAULT_CONTROL_HZ: u16 = 1000;
-pub(crate) const TX_FRAME_BUF_LEN: usize = 32;
-pub(crate) const CMD_QUEUE_LEN: usize = 16;
+pub const TX_FRAME_BUF_LEN: usize = 32;
+pub const CMD_QUEUE_LEN: usize = 16;
 
 #[derive(Clone, Copy)]
 pub enum CommonCmd {
@@ -120,26 +120,29 @@ impl MotorHandle {
 
 pub struct fdCANbus {
     motors: [Option<&'static mut dyn Motor_Base>; MAX_MOTORS],
-    cmd_ch: Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN>,
+    /// 命令通道: 由外部 static 创建, 多个 MotorHandle 共享发送端, task 独占接收端
+    cmd_ch: &'static Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN>,
 }
 
 impl fdCANbus {
-    pub fn new() -> Self 
+    pub fn new(
+        cmd_ch: &'static Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN>,
+    ) -> Self
     {
         Self {
             motors: [None, None, None, None, None, None, None, None, None, None,],
-            cmd_ch: Channel::new(),
+            cmd_ch,
         }
     }
 
-    pub fn cmd_channel(&'static self) -> &'static Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN> 
+    pub fn cmd_channel(&self) -> &'static Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN>
     {
-        &self.cmd_ch
+        self.cmd_ch
     }
 
-    pub fn motor_handle(&'static self, motor_id: u32) -> MotorHandle 
+    pub fn motor_handle(&self, motor_id: u32) -> MotorHandle
     {
-        MotorHandle::new(motor_id, self.cmd_channel())
+        MotorHandle::new(motor_id, self.cmd_ch)
     }
 
     pub fn register_motor(&mut self, motor: &'static mut dyn Motor_Base) -> bool 
@@ -170,14 +173,14 @@ fn to_canframe(rx_frame: &can::Frame) -> CanFrame
     }
 }
 
-#[embassy_executor::task]
+#[embassy_executor::task(pool_size = 2)]
 pub async fn fdcan_bus_actor_task(
     mut rx: can::CanRx<'static>,
     mut tx: can::CanTx<'static>,
     bus: &'static mut fdCANbus,) -> ! 
 {
 
-    let cmd_ch = &bus.cmd_ch;
+    let cmd_ch = bus.cmd_ch;
 
     let period = Duration::from_millis(1);
     let mut next = Instant::now() + period;
