@@ -1,6 +1,7 @@
 #![allow(dead_code)] //允许未使用的代码 
 
 use core::panic;
+use core::cell::RefCell;
 
 use super::motor_base::{MotorBaseData, Motor_Base};
 use crate::XieFField_Lib::bsp::bsp_fdCANbus::CanFrame;
@@ -314,9 +315,11 @@ impl Motor_Base for DJI_Motor{
 }
 
 
-pub struct  DJI_Group{
+pub struct DJI_Group{
     base_tx_id: u32,
-    motors: [Option< DJI_Motor>; 4],
+    /// &RefCell 引用: 电机本体注册在 bus 里 (通过 MotorCellWrapper),
+    /// Group 只在 pack 时 borrow() 读取 target_current
+    motors: [Option<&'static RefCell<DJI_Motor>>; 4],
     motor_count: u8,
     contains_gm6020: bool,
 }
@@ -332,97 +335,93 @@ impl DJI_Group {
         }
     }
 
-    pub fn add_motor(&mut self, motor: DJI_Motor) -> bool
+    pub fn add_motor(&mut self, motor_cell: &'static RefCell<DJI_Motor>) -> bool
     {
         if self.motor_count >= 4
         {
             panic!("[添加失败]: DJI_Group{}已满员，无法添加更多电机", self.base_tx_id);
         }
 
-        if motor.base_data().motor_id < 1 || motor.base_data().motor_id > 8
+        let motor = motor_cell.borrow();
+        let mid = motor.base_data().motor_id;
+        let mtype = motor.motor_type;
+
+        if mid < 1 || mid > 8
         {
-            panic!("[添加失败]: DJI电机ID {} 不合法,必须在1到8之间", motor.base_data().motor_id);
+            panic!("[添加失败]: DJI电机ID {} 不合法,必须在1到8之间", mid);
         }
 
-        if motor.motor_type == DJI_Motor_Type::M6020
+        if mtype == DJI_Motor_Type::M6020
         {
             if self.base_tx_id != SEND_ID_6020_LOW && self.base_tx_id != SEND_ID_6020_HIGH
             {
                 panic!("[添加失败]: DJI M6020电机只能添加到base_tx_id为0x1FE或0x2FE的DJI_Group中");
             }
-            else if self.base_tx_id == SEND_ID_6020_LOW && !(motor.base_data().motor_id >=1 && motor.base_data().motor_id <= 4)
+            else if self.base_tx_id == SEND_ID_6020_LOW && !(mid >=1 && mid <= 4)
             {
                 panic!("[添加失败]: base_tx_id为0x1FE的DJI_Group只能添加ID在1到4之间的M6020电机");
             }
-            else if self.base_tx_id == SEND_ID_6020_HIGH && !(motor.base_data().motor_id >=5 && motor.base_data().motor_id <= 7)
+            else if self.base_tx_id == SEND_ID_6020_HIGH && !(mid >=5 && mid <= 7)
             {
                 panic!("[添加失败]: base_tx_id为0x2FE的DJI_Group只能添加ID在5到7之间的M6020电机");
             }
         }
-        else if  motor.motor_type == DJI_Motor_Type::M3508 || motor.motor_type == DJI_Motor_Type::M2006
+        else if  mtype == DJI_Motor_Type::M3508 || mtype == DJI_Motor_Type::M2006
         {
             if self.base_tx_id != SEND_ID_LOW && self.base_tx_id != SEND_ID_HIGH
             {
                 panic!("[添加失败]: DJI M3508/M2006电机只能添加到base_tx_id为0x1FF或0x2FF的DJI_Group中");
             }
-            else if self.base_tx_id == SEND_ID_LOW && !(motor.base_data().motor_id >=1 && motor.base_data().motor_id <= 4)
+            else if self.base_tx_id == SEND_ID_LOW && !(mid >=1 && mid <= 4)
             {
                 panic!("[添加失败]: base_tx_id为0x1FF的DJI_Group只能添加ID在1到4之间的M3508/M2006电机");
             }
-            else if self.base_tx_id == SEND_ID_HIGH && !(motor.base_data().motor_id >=5 && motor.base_data().motor_id <= 8)
+            else if self.base_tx_id == SEND_ID_HIGH && !(mid >=5 && mid <= 8)
             {
                 panic!("[添加失败]: base_tx_id为0x2FF的DJI_Group只能添加ID在5到8之间的M3508/M2006电机");
             }
         }
-        else 
+        else
         {
             panic!("[添加失败]: 不支持的DJI电机类型");
         }
 
+        // 检查同类型一致性
         if self.motor_count == 0
         {
-            if motor.motor_type == DJI_Motor_Type::M6020
-            {
-                self.contains_gm6020 = true;
-            }
-            else 
-            {
-                self.contains_gm6020 = false;
-            }
+            self.contains_gm6020 = mtype == DJI_Motor_Type::M6020;
         }
-        else 
+        else if mtype == DJI_Motor_Type::M6020 && !self.contains_gm6020
         {
-            if motor.motor_type == DJI_Motor_Type::M6020 && !self.contains_gm6020
-            {
-                panic!("[添加失败]: 已有非M6020电机,无法添加M6020电机");
-            }
-            else if motor.motor_type != DJI_Motor_Type::M6020 && self.contains_gm6020
-            {
-                panic!("[添加失败]: 已有M6020电机,无法添加非M6020电机");
-            }
+            panic!("[添加失败]: 已有非M6020电机,无法添加M6020电机");
+        }
+        else if mtype != DJI_Motor_Type::M6020 && self.contains_gm6020
+        {
+            panic!("[添加失败]: 已有M6020电机,无法添加非M6020电机");
         }
 
-        let slot = self.calc_slot(motor.base_data().motor_id, motor.motor_type);
-        if slot < 0 || slot >= 4 { return false; }
+        drop(motor); // 释放 borrow, 后面的操作不需要
 
-        if self.motors[slot as usize].is_some() { return false; }//被占用
-        
-        self.motors[slot as usize] = Some(motor);
+        let slot = self.calc_slot(mid, mtype);
+        if slot < 0 || slot >= 4 { return false; }
+        if self.motors[slot as usize].is_some() { return false; }
+
+        self.motors[slot as usize] = Some(motor_cell);
         self.motor_count = self.motor_count.wrapping_add(1);
         true
     }
 
-    fn calc_slot(&self, mid: u32, mtype: DJI_Motor_Type) -> isize 
+    fn calc_slot(&self, mid: u32, mtype: DJI_Motor_Type) -> isize
     {
-        match mtype 
+        match mtype
         {
-            DJI_Motor_Type::M6020 => 
+            DJI_Motor_Type::M6020 =>
             {
                 if self.base_tx_id == SEND_ID_6020_LOW && (1..=4).contains(&mid) { (mid - 1) as isize }
                 else if self.base_tx_id == SEND_ID_6020_HIGH && (5..=7).contains(&mid) { (mid - 5) as isize }
                 else { -1 }
             }
-            _ => 
+            _ =>
             {
                 if self.base_tx_id == SEND_ID_LOW && (1..=4).contains(&mid) { (mid - 1) as isize }
                 else if self.base_tx_id == SEND_ID_HIGH && (5..=8).contains(&mid) { (mid - 5) as isize }
@@ -433,26 +432,24 @@ impl DJI_Group {
 }
 
 impl Motor_Base for DJI_Group{
-    #[allow(unused_variables)]
-    fn update(&mut self) 
-    {
-        for motor in self.motors.iter_mut().flatten()
-        {
-            motor.update();
-        }
-    }
-    
-    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize 
+    // ── 不做 update/feedback/match: 由注册在 bus 里的单个 DJI_Motor 负责 ──
+    fn update(&mut self) {}
+    fn update_feedback(&mut self, _in_frame: &CanFrame) {}
+    fn match_frame(&self, _in_frame: &CanFrame) -> bool { false }
+
+    // ── 只负责：把 4 个电机的 target_current 打包进 1 帧 CAN ──
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize
     {
         if out_frames.is_empty() || self.motor_count == 0 { return 0; }
         let frame = &mut out_frames[0];
         *frame = CanFrame::new(self.base_tx_id, false);
         frame.dlc = 8;
-        for (i, motor_opt) in self.motors.iter().enumerate() 
+        for (i, cell_opt) in self.motors.iter().enumerate()
         {
-            if let Some(m) = motor_opt 
+            if let Some(cell) = cell_opt
             {
-                let current = real_to_raw_current(m.motor_type,m.get_target_current());
+                let motor = cell.borrow();
+                let current = real_to_raw_current(motor.motor_type, motor.get_target_current());
                 frame.data[i * 2] = (current >> 8) as u8;
                 frame.data[i * 2 + 1] = current as u8;
             }
@@ -460,34 +457,25 @@ impl Motor_Base for DJI_Group{
         1
     }
 
-    fn match_frame(&self, in_frame: &CanFrame) -> bool 
-    {
-        self.motors.iter().flatten().any(|m| m.match_frame(in_frame))    
-    }
+    // ── 控制频率: Group 始终 1kHz 全速 ──
+    fn get_control_frequency(&self) -> u16 { 1000 }
+    fn get_control_cnt(&self) -> u16 { 0 }
+    fn inc_control_cnt(&mut self) {}
+    fn reset_control_cnt(&mut self) {}
 
-    #[allow(unused_variables)]
-    fn update_feedback(&mut self, in_frame: &CanFrame) 
-    {
-        for motor in self.motors.iter_mut().flatten()
-        {
-            if motor.match_frame(in_frame)
-            {
-                motor.update_feedback(in_frame);
-            }
-        }
-    }
+    fn get_motor_id(&self) -> u32 { u32::MAX }
 
     #[doc(hidden)]
     #[allow(private_interfaces)]
-    fn base_data_mut(&mut self) -> &mut MotorBaseData 
+    fn base_data_mut(&mut self) -> &mut MotorBaseData
     {
-        panic!("[错误]: DJI_Group不可使用base_data_mut接口");
+        panic!("[错误]: DJI_Group不支持base_data_mut接口");
     }
     #[doc(hidden)]
     #[allow(private_interfaces)]
-    fn base_data(&self) -> &MotorBaseData 
+    fn base_data(&self) -> &MotorBaseData
     {
-        panic!("[错误]: DJI_Group不可使用base_data接口");
+        panic!("[错误]: DJI_Group不支持base_data接口");
     }
 }
 

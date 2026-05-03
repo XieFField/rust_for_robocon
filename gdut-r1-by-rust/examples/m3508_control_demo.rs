@@ -3,8 +3,10 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use core::cell::RefCell;
+
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 use defmt::*;
 use embassy_stm32::peripherals::*;
@@ -17,7 +19,10 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use gdut_r1_by_rust::XieFField_Lib::bsp::bsp_fdCANbus::{
     self, fdCANbus, MotorHandle, BusCmd, CMD_QUEUE_LEN,
 };
-use gdut_r1_by_rust::XieFField_Lib::motor::motor_DJI::{DJI_Motor, DJI_Group, SEND_ID_LOW};
+use gdut_r1_by_rust::XieFField_Lib::motor::motor_DJI::{
+    DJI_Motor, DJI_Group, SEND_ID_LOW,
+};
+use gdut_r1_by_rust::XieFField_Lib::motor::motor_base::{MotorCellWrapper, Motor_Base};
 use gdut_r1_by_rust::XieFField_Lib::app::app_pid::PID_Param_Config;
 
 use static_cell::StaticCell;
@@ -42,9 +47,9 @@ async fn main(spawner: Spawner) -> ! {
     config.rcc.pll1 = Some(rcc::Pll {
         source: rcc::PllSource::HSE,
         prediv: rcc::PllPreDiv::DIV5,
-        mul: rcc::PllMul::MUL96,       // 480MHz
+        mul: rcc::PllMul::MUL96,
         divq: Some(rcc::PllDiv::DIV4),
-        divp: Some(rcc::PllDiv::DIV1), // SYSCLK = 480MHz
+        divp: Some(rcc::PllDiv::DIV1),
         divr: None,
     });
 
@@ -61,12 +66,12 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = embassy_stm32::init(config);
 
     // ════════════════════════════════════════════════
-    // 2. FDCAN1 硬件初始化
+    // 2. FDCAN1 硬件
     // ════════════════════════════════════════════════
     let mut can1 = can::CanConfigurator::new(
         peripherals.FDCAN1,
-        peripherals.PD0,  // RX
-        peripherals.PD1,  // TX
+        peripherals.PD0,
+        peripherals.PD1,
         Irqs,
     );
     can1.set_bitrate(1_000_000);
@@ -80,10 +85,7 @@ async fn main(spawner: Spawner) -> ! {
     info!("FDCAN1 初始化完成, 1Mbps");
 
     // ════════════════════════════════════════════════
-    // 3. 创建命令 Channel (独立 static)
-    //
-    // Channel 从 fdCANbus 中拆出, MotorHandle 和 task
-    // 各持有一个 &'static 引用, 互不冲突。
+    // 3. 命令 Channel
     // ════════════════════════════════════════════════
     static CMD_CH: StaticCell<Channel<CriticalSectionRawMutex, BusCmd, CMD_QUEUE_LEN>> =
         StaticCell::new();
@@ -91,66 +93,85 @@ async fn main(spawner: Spawner) -> ! {
         CMD_CH.init(Channel::new());
 
     // ════════════════════════════════════════════════
-    // 4. 创建 fdCANbus (传入 &'static Channel)
+    // 4. fdCANbus
     // ════════════════════════════════════════════════
     static CAN1BUS: StaticCell<fdCANbus> = StaticCell::new();
     let can1_bus: &'static mut fdCANbus = CAN1BUS.init(fdCANbus::new(cmd_ch));
 
     // ════════════════════════════════════════════════
-    // 5. 创建 M3508 电机 + DJI_Group
+    // 5. 创建 3 个 M3508 电机 (RefCell<DJI_Motor> 静态分配)
+    //
+    // ★ 关键: 电机本体用 StaticCell<RefCell<DJI_Motor>> 分配,
+    //   然后通过 MotorCellWrapper 注册到 bus, 同时把 &RefCell
+    //   传给 DJI_Group 用于打包。
+    // ════════════════════════════════════════════════
+
+    // 5a. 电机1: 速度环+位置环
+    static M1: StaticCell<RefCell<DJI_Motor>> = StaticCell::new();
+    let m1_cell: &'static RefCell<DJI_Motor> = M1.init(RefCell::new(
+        DJI_Motor::new_m3508(1, true, true)
+    ));
+    m1_cell.borrow_mut().init_speed_pid(PID_Param_Config::new(
+        250.0, 12.0, 0.0, 15000.0, 8000.0, true, 0.1,
+    ));
+    m1_cell.borrow_mut().init_pos_pid(
+        PID_Param_Config::new(5.0, 0.0, 0.05, 400.0, 0.0, true, 0.0),
+        false, 0.0,
+    );
+
+    // 5b. 电机2: 仅速度环
+    static M2: StaticCell<RefCell<DJI_Motor>> = StaticCell::new();
+    let m2_cell: &'static RefCell<DJI_Motor> = M2.init(RefCell::new(
+        DJI_Motor::new_m3508(2, true, false)
+    ));
+    m2_cell.borrow_mut().init_speed_pid(PID_Param_Config::new(
+        250.0, 12.0, 0.0, 15000.0, 8000.0, true, 0.1,
+    ));
+
+    // 5c. 电机3: 纯电流
+    static M3: StaticCell<RefCell<DJI_Motor>> = StaticCell::new();
+    let m3_cell: &'static RefCell<DJI_Motor> = M3.init(RefCell::new(
+        DJI_Motor::new_m3508(3, false, false)
+    ));
+
+    // ════════════════════════════════════════════════
+    // 6. 注册单个电机到总线 (通过 MotorCellWrapper)
+    //    → update / update_feedback / match_frame / CMD 都走这里
+    // ════════════════════════════════════════════════
+    static WRAP1: StaticCell<MotorCellWrapper<DJI_Motor>> = StaticCell::new();
+    static WRAP2: StaticCell<MotorCellWrapper<DJI_Motor>> = StaticCell::new();
+    static WRAP3: StaticCell<MotorCellWrapper<DJI_Motor>> = StaticCell::new();
+
+    let w1 = WRAP1.init(MotorCellWrapper::new(m1_cell));
+    let w2 = WRAP2.init(MotorCellWrapper::new(m2_cell));
+    let w3 = WRAP3.init(MotorCellWrapper::new(m3_cell));
+
+    can1_bus.register_motor(w1);
+    can1_bus.register_motor(w2);
+    can1_bus.register_motor(w3);
+
+    // ════════════════════════════════════════════════
+    // 7. 创建 DJI_Group (只负责 pack)
+    //    → 传入 &RefCell<DJI_Motor>, Group 在 pack 时 borrow() 读取
     // ════════════════════════════════════════════════
     static DJI_GROUP1: StaticCell<DJI_Group> = StaticCell::new();
     let dji_group1 = DJI_GROUP1.init(DJI_Group::new(SEND_ID_LOW));
 
-    // 电机1: 速度环+位置环
-    let mut m1 = DJI_Motor::new_m3508(1, true, true);
-    m1.init_speed_pid(PID_Param_Config::new(
-        10.0, 0.5, 0.1, 5000.0, 2000.0, true, 0.0,
-    ));
-    m1.init_pos_pid(
-        PID_Param_Config::new(5.0, 0.2, 0.05, 2000.0, 1000.0, true, 0.0),
-        true,
-        20.0,
-    );
+    dji_group1.add_motor(m1_cell);
+    dji_group1.add_motor(m2_cell);
+    dji_group1.add_motor(m3_cell);
 
-    // 电机2: 仅速度环
-    let mut m2 = DJI_Motor::new_m3508(2, true, false);
-    m2.init_speed_pid(PID_Param_Config::new(
-        8.0, 0.3, 0.08, 4000.0, 1500.0, true, 0.0,
-    ));
-
-    // 电机3: 纯电流控制
-    let m3 = DJI_Motor::new_m3508(3, false, false);
-
-    dji_group1.add_motor(m1);
-    dji_group1.add_motor(m2);
-    dji_group1.add_motor(m3);
-
-    info!("DJI_Group 创建完成: base_tx_id=0x{:03X}, 3xM3508", SEND_ID_LOW);
-
-    // ════════════════════════════════════════════════
-    // 6. 注册 Group 到总线
-    // ════════════════════════════════════════════════
     can1_bus.register_motor(dji_group1);
 
+    info!("总线注册完成: 3xDJI_Motor + 1xDJI_Group");
+
     // ════════════════════════════════════════════════
-    // 7. MotorHandle — 直接从 Channel 创建, 不经过 bus
-    //
-    // 这是消除 borrow 冲突的关键:
-    //   MotorHandle 持有 &'static Channel (共享)
-    //   actor task   持有 &'static mut fdCANbus (独占 motors 数组)
-    //   两者各借各的, 互不干扰。
+    // 8. MotorHandle + 启动任务
     // ════════════════════════════════════════════════
     let h1 = MotorHandle::new(1, cmd_ch);
     let h2 = MotorHandle::new(2, cmd_ch);
     let h3 = MotorHandle::new(3, cmd_ch);
 
-    // ════════════════════════════════════════════════
-    // 8. 启动总线 Actor 任务
-    //
-    // can1_bus 被 move 进 task, 此后外部不能再访问 bus.
-    // 但 MotorHandle 早就在第7步创建好了, 不受影响。
-    // ════════════════════════════════════════════════
     unwrap!(spawner.spawn(bsp_fdCANbus::fdcan_bus_actor_task(rx, tx, can1_bus)));
 
     // ════════════════════════════════════════════════
@@ -159,77 +180,67 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after_millis(200).await;
     info!("===== M3508 控制演示 =====");
 
-    // ── 阶段1: 电流模式 ──
-    info!("[1] 电流模式: 全部 500mA");
-    h1.set_target_current(500.0).await;
-    h2.set_target_current(500.0).await;
+    // ── 电流模式 ──
+    info!("[1] 电流模式: m1=2000mA, m2=1000mA, m3=500mA");
+    h1.set_target_current(2000.0).await;
+    h2.set_target_current(1000.0).await;
     h3.set_target_current(500.0).await;
     Timer::after_secs(2).await;
 
-    // ── 阶段2: 速度模式 ──
-    info!("[2] 速度模式: m1=1000RPM, m2=500RPM, m3=停");
-    h1.set_target_rpm(1000.0).await;
-    h2.set_target_rpm(500.0).await;
+    // ── 速度模式 ──
+    info!("[2] 速度模式: m1=100RPM, m2=50RPM, m3=停");
+    h1.set_target_rpm(100.0).await;
+    h2.set_target_rpm(50.0).await;
     h3.set_target_current(0.0).await;
     Timer::after_secs(3).await;
 
-    // ── 阶段3: 角度模式 ──
-    info!("[3] 角度模式: m1=90°");
+    // ── 位置模式 ──
+    info!("[3] 位置模式: m1=90°");
     h1.set_target_angle(90.0).await;
     Timer::after_secs(3).await;
 
-    // ── 阶段4: 总角度模式 ──
-    info!("[4] 总角度模式: m1=720°(2圈)");
-    h1.set_target_total_angle(720.0).await;
-    Timer::after_secs(5).await;
-
-    // ── 阶段5: 停机 ──
-    info!("[5] 全部停机");
+    // ── 停机 ──
+    info!("[4] 全部停机");
     h1.set_target_current(0.0).await;
     h2.set_target_current(0.0).await;
     h3.set_target_current(0.0).await;
+
+    // ════════════════════════════════════════════════
+    // 10. 读取反馈: 直接 borrow RefCell<DJI_Motor>
+    //
+    // 应用层持有 m1_cell/m2_cell/m3_cell, 任何时候都可以:
+    //   let motor = m1_cell.borrow();
+    //   info!("rpm={}", motor.get_RPM());
+    //
+    // 因为是单核 embassy, bus task 和你的代码不会同时 borrow_mut,
+    // 所以 RefCell 不会在运行时 panic。
+    // ════════════════════════════════════════════════
+    info!("===== 反馈读取演示 =====");
+
+    let motor1 = m1_cell.borrow();
+    info!(
+        "电机1: rpm={}, current={}mA, angle={}, temp={}",
+        motor1.get_RPM(),
+        motor1.get_current(),
+        motor1.get_angle(),
+        motor1.get_temperature()
+    );
+    drop(motor1);
+
+    let motor2 = m2_cell.borrow();
+    info!(
+        "电机2: rpm={}, target_rpm={}",
+        motor2.get_RPM(),
+        motor2.get_target_RPM()
+    );
+    drop(motor2);
 
     info!("===== 演示完成 =====");
 
     loop {
         Timer::after_secs(1).await;
-        info!("心跳");
+        // 周期读取
+        let m1 = m1_cell.borrow();
+        info!("m1: rpm={}, angle={}", m1.get_RPM(), m1.get_angle());
     }
 }
-
-// ════════════════════════════════════════════════════════════════
-//  多路 CAN 总线扩展
-// ════════════════════════════════════════════════════════════════
-//
-// 如果有 FDCAN1 + FDCAN2, 只需:
-//
-// 1. 绑两套中断:
-//    bind_interrupts!(struct Irqs1 { ... });
-//    bind_interrupts!(struct Irqs2 { ... });
-//
-// 2. 每条总线有独立的 Channel + fdCANbus + Group:
-//
-//    static CH1: StaticCell<Channel<...>> = StaticCell::new();
-//    let ch1 = CH1.init(Channel::new());
-//    static CH2: StaticCell<Channel<...>> = StaticCell::new();
-//    let ch2 = CH2.init(Channel::new());
-//
-//    static BUS1: StaticCell<fdCANbus> = StaticCell::new();
-//    let bus1 = BUS1.init(fdCANbus::new(ch1));
-//    static BUS2: StaticCell<fdCANbus> = StaticCell::new();
-//    let bus2 = BUS2.init(fdCANbus::new(ch2));
-//
-// 3. 分别 spawn (pool_size = 2 已在 task 属性中声明):
-//
-//    spawner.spawn(fdcan_bus_actor_task(rx1, tx1, bus1));
-//    spawner.spawn(fdcan_bus_actor_task(rx2, tx2, bus2));
-//
-// 4. MotorHandle 用对应 Channel:
-//
-//    let h1 = MotorHandle::new(1, ch1); // bus1 上的电机
-//    let h2 = MotorHandle::new(5, ch2); // bus2 上的电机
-//
-// 也可以共用一个 Channel 给两条总线:
-//    - 共用: 所有 MotorHandle 发到同一个队列, 两条 bus 都会尝试 apply 命令
-//      (只有注册了对应 motor_id 的那条 bus 会成功)
-//    - 分开: 每条 bus 独立, 命令精准送达 (推荐)
