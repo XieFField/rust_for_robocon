@@ -244,3 +244,4 @@ async fn main(spawner: Spawner) -> ! {
         info!("m1: rpm={}, angle={}", m1.get_RPM(), m1.get_angle());
     }
 }
+
