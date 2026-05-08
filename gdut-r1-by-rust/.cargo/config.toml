@@ -4,5 +4,9 @@ runner = "probe-rs run --chip STM32H723ZG"
 [build]
 target = "thumbv7em-none-eabihf"
 
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32H723ZG"
+
 [env]
 DEFMT_LOG = "info"
+

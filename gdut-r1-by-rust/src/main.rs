@@ -4,30 +4,28 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
-
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
-use {defmt_rtt as _, panic_probe as _};
+// use panic_halt as _;
 
-use defmt::*; //日志输出
-use embassy_stm32::{pac::sdmmc::regs::Id, peripherals::*}; //导入所有外设
+use defmt_rtt as _;
+use embassy_stm32::peripherals::*;
 
-
-// RTT日志输出 + 崩溃自动报错
-use {defmt_rtt as _, panic_probe as _};
-
+use panic_rtt_target as _; //使用rtt输出panic信息
+use rtt_target::{rtt_init_print, rprintln};
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) -> ! 
+async fn main(_spawner: Spawner) -> !
 {
-    let mut config = embassy_stm32::Config::default();
+    rtt_init_print!(); //初始化RTT日志输出
+    let config = embassy_stm32::Config::default();
     embassy_stm32::init(config);//初始化芯片
-    
-        
-    loop 
+
+    let mut id: i32 = 111;
+    loop
     {
-        info!("Hello, world!");
+        rprintln!("Hello, world! {}", id);
+        id += 1;
         Timer::after(Duration::from_secs(1)).await;
     }
-
 }

@@ -14,6 +14,8 @@ bench = false
 defmt = "1.0"
 defmt-rtt = "1.1"
 panic-probe = { version = "1.0", features = ["print-defmt"] }
+rtt-target = { version = "0.6.2", features = ["defmt"] }
+panic-halt = "1.0.0"
 
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
@@ -31,7 +33,9 @@ embedded-can = "0.4.1"
 
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 critical-section = "1.2.0"
-embassy-stm32 = { version = "0.6", features = ["defmt", "stm32h723zg", "unstable-pac", "memory-x", "time-driver-any" ]  }
+embassy-stm32 = { version = "0.6", features = ["defmt", "stm32h723zg", "unstable-pac", "time-driver-any" ]  }
+panic-rtt-target = "0.2.0"
+
 
 
 [profile.release]
@@ -43,3 +47,5 @@ opt-level = 'z'
 debug = 2
 lto = false
 opt-level = "s"
+
+

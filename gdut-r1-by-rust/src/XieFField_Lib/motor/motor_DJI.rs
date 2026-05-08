@@ -1,6 +1,5 @@
 #![allow(dead_code)] //允许未使用的代码 
 
-use core::panic;
 use core::cell::RefCell;
 
 use super::motor_base::{MotorBaseData, Motor_Base};
