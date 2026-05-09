@@ -7,7 +7,7 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 // use panic_halt as _;
-
+use core::hint::black_box;
 use defmt_rtt as _;
 use embassy_stm32::peripherals::*;
 
@@ -25,6 +25,7 @@ async fn main(_spawner: Spawner) -> !
     loop
     {
         rprintln!("Hello, world! {}", id);
+        //defmt::info!("Hello, world! {}", id);
         id += 1;
         Timer::after(Duration::from_secs(1)).await;
     }

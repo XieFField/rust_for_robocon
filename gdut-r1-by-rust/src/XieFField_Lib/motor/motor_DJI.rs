@@ -7,6 +7,7 @@ use crate::XieFField_Lib::bsp::bsp_fdCANbus::CanFrame;
 use crate::XieFField_Lib::bsp::bsp_encoder::{Encoder};
 use crate::XieFField_Lib::app::app_pid::{PID_Incremental,PID_Position,PID_Param_Config};
 use crate::XieFField_Lib::app::app_tool;
+use crate::XieFField_Lib::motor::motor_base::MotorCellWrapper;
 
 /**
  * @attention: DJI_Motor需要注册到DJI_Group，由DJI_Group进行统一的CAN帧打包和反馈更新
@@ -21,6 +22,7 @@ pub enum DJI_Motor_Type
     M6020,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DJI_Control_Mode
 {
     Current,
@@ -478,6 +480,17 @@ impl Motor_Base for DJI_Group{
     }
 }
 
+impl MotorCellWrapper<DJI_Motor> {
+    pub fn motor_type(&self) -> DJI_Motor_Type 
+    {
+        self.cell().borrow().motor_type
+    }
+
+    pub fn control_mode(&self) -> DJI_Control_Mode
+    {
+        self.cell().borrow().control_mode
+    }
+}
 
 
 

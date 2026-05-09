@@ -46,6 +46,6 @@ opt-level = 'z'
 [profile.dev]
 debug = 2
 lto = false
-opt-level = "s"
+opt-level =0
 
 

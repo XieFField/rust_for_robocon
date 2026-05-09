@@ -163,43 +163,50 @@ pub struct MotorCellWrapper<T: Motor_Base + 'static> {
 }
 
 impl<T: Motor_Base + 'static> MotorCellWrapper<T> {
-    pub fn new(cell: &'static RefCell<T>) -> Self {
+    pub fn new(cell: &'static RefCell<T>) -> Self 
+    {
         Self { cell }
     }
 
     /// 获取内部 RefCell 的引用, 供 DJI_Group 等外部持有者读取电机数据
-    pub fn cell(&self) -> &'static RefCell<T> {
+    pub fn cell(&self) -> &'static RefCell<T> 
+    {
         self.cell
     }
 }
 
 impl<T: Motor_Base + 'static> Motor_Base for MotorCellWrapper<T> {
-    fn update(&mut self) {
-        self.cell.borrow_mut().update();
-    }
+    fn update(&mut self) { self.cell.borrow_mut().update();}
 
-    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize {
+    fn pack_command(&mut self, out_frames: &mut [CanFrame]) -> usize 
+    {
         self.cell.borrow_mut().pack_command(out_frames)
     }
 
-    fn update_feedback(&mut self, in_frame: &CanFrame) {
+    fn update_feedback(&mut self, in_frame: &CanFrame) 
+    {
         self.cell.borrow_mut().update_feedback(in_frame);
     }
 
-    fn match_frame(&self, in_frame: &CanFrame) -> bool {
+    fn match_frame(&self, in_frame: &CanFrame) -> bool 
+    {
         self.cell.borrow().match_frame(in_frame)
     }
 
-    fn set_target_RPM(&mut self, tar_RPM: f32) {
+    fn set_target_RPM(&mut self, tar_RPM: f32) 
+    {
         self.cell.borrow_mut().set_target_RPM(tar_RPM);
     }
-    fn set_target_current(&mut self, tar_current: f32) {
+    fn set_target_current(&mut self, tar_current: f32) 
+    {
         self.cell.borrow_mut().set_target_current(tar_current);
     }
-    fn set_target_angle(&mut self, tar_angle: f32) {
+    fn set_target_angle(&mut self, tar_angle: f32) 
+    {
         self.cell.borrow_mut().set_target_angle(tar_angle);
     }
-    fn set_target_total_angle(&mut self, tar_total_angle: f32) {
+    fn set_target_total_angle(&mut self, tar_total_angle: f32) 
+    {
         self.cell.borrow_mut().set_target_total_angle(tar_total_angle);
     }
 
@@ -214,17 +221,21 @@ impl<T: Motor_Base + 'static> Motor_Base for MotorCellWrapper<T> {
     fn get_target_angle(&self) -> f32 { self.cell.borrow().get_target_angle() }
     fn get_target_total_angle(&self) -> f32 { self.cell.borrow().get_target_total_angle() }
 
-    fn relocate_total_angle(&mut self, value: f32) {
+    fn relocate_total_angle(&mut self, value: f32) 
+    {
         self.cell.borrow_mut().relocate_total_angle(value);
     }
 
-    fn reset_control_cnt(&mut self) {
+    fn reset_control_cnt(&mut self) 
+    {
         self.cell.borrow_mut().reset_control_cnt();
     }
-    fn reset_control_frequency(&mut self, new_freq: u16) {
+    fn reset_control_frequency(&mut self, new_freq: u16) 
+    {
         self.cell.borrow_mut().reset_control_frequency(new_freq);
     }
-    fn reset_gear_ratio(&mut self, new_gear_ratio: f32) {
+    fn reset_gear_ratio(&mut self, new_gear_ratio: f32) 
+    {
         self.cell.borrow_mut().reset_gear_ratio(new_gear_ratio);
     }
 
