@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../RTT_DebugTool"
+		},
+		{
+			"path": "../RTT-DebugTool-MCU"
 		}
 	],
 	"settings": {
