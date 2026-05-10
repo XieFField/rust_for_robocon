@@ -16,41 +16,43 @@ use rtt_target::{rtt_init, rprintln};
 use rtt_debug_tool_mcu::Watch;
 use rtt_debug_tool_mcu::watch_task::debug_watch_task;
 use rtt_debug_tool_mcu::watch_table::register_watch_fields;
-use rtt_debug_tool_mcu::{watch_scalar, watch_config};
+use rtt_debug_tool_mcu::{watch_scalar, watch_struct, watch_struct_all, watch_config};
 
 // ═══════════════════════════════════════════════════════════
-// StaticCell 占位 (运行前用 RefCell::new 初始化)
+// 观测变量定义
 // ═══════════════════════════════════════════════════════════
 
-static COUNTER: StaticCell<RefCell<u32>>  = StaticCell::new();
-static VOLTAGE: StaticCell<RefCell<f32>>  = StaticCell::new();
-static ACTIVE:  StaticCell<RefCell<bool>> = StaticCell::new();
+// ── 1. 普通 f32 变量 ──
+static BAT_VOLTAGE: StaticCell<RefCell<f32>> = StaticCell::new();
 
-// —— #[derive(Watch)] 自动注册全部字段 ——
-#[derive(Watch)]
-struct MotorState {
-    rpm:         f32,
-    current:     f32,
-    temperature: u8,
-}
-static MOTOR: StaticCell<RefCell<MotorState>> = StaticCell::new();
+// ── 2. 普通 i32 变量 ──
+static LOOP_COUNT: StaticCell<RefCell<i32>> = StaticCell::new();
 
-#[derive(Watch)]
-struct Arm {
-    joint_angle: f32,
-    #[watch(readonly)]
-    joint_speed: f32,
+// ── 3. 非嵌套结构体 (手动选择字段 + 精确指定读写权限) ──
+struct PidGains {
+    kp: f32,
+    ki: f32,
+    kd: f32,
 }
-static ARM: StaticCell<RefCell<Arm>> = StaticCell::new();
+static PID: StaticCell<RefCell<PidGains>> = StaticCell::new();
+
+// ── 4. 嵌套结构体 (自动展开全部子字段) ──
+//      内部: #[derive(Watch)] 自动发现 JointState 的字段
+//      外部: watch_struct_all! 将 pitch.* / roll.* 平铺为观测条目
 
 #[derive(Watch)]
-struct Chassis {
+struct JointState {
+    angle: f32,
     #[watch(readonly)]
-    x: f32,
-    #[watch(readonly)]
-    y: f32,
+    speed: f32,
 }
-static CHASSIS: StaticCell<RefCell<Chassis>> = StaticCell::new();
+
+struct RobotArm {
+    voltage: f32,
+    pitch:   JointState,
+    roll:    JointState,
+}
+static ARM: StaticCell<RefCell<RobotArm>> = StaticCell::new();
 
 // ═══════════════════════════════════════════════════════════
 // 主入口
@@ -73,86 +75,81 @@ async fn main(spawner: Spawner) -> ! {
     let config = embassy_stm32::Config::default();
     embassy_stm32::init(config);
 
-    // ═══ 2. 创建 RefCell 实例 (StaticCell → &'static RefCell) ═══
-    let counter: &'static RefCell<u32> = COUNTER.init(RefCell::new(0));
-    let voltage: &'static RefCell<f32> = VOLTAGE.init(RefCell::new(3.30));
-    let active:  &'static RefCell<bool> = ACTIVE.init(RefCell::new(false));
+    // ═══ 2. 创建 RefCell 实例 ═══
+    let bat_v:  &'static RefCell<f32> = BAT_VOLTAGE.init(RefCell::new(12.60));
+    let loops:  &'static RefCell<i32> = LOOP_COUNT.init(RefCell::new(0));
 
-    let motor: &'static RefCell<MotorState> = MOTOR.init(RefCell::new(MotorState {
-        rpm:         0.0,
-        current:     0.50,
-        temperature: 25,
+    let pid: &'static RefCell<PidGains> = PID.init(RefCell::new(PidGains {
+        kp: 2.5,
+        ki: 0.1,
+        kd: 0.05,
     }));
 
-    let arm: &'static RefCell<Arm> = ARM.init(RefCell::new(Arm {
-        joint_angle: 90.0,
-        joint_speed: 0.0,
-    }));
-    
-    let chassis: &'static RefCell<Chassis> = CHASSIS.init(RefCell::new(Chassis {
-        x: 0.0,
-        y: 0.0,
+    let arm: &'static RefCell<RobotArm> = ARM.init(RefCell::new(RobotArm {
+        voltage: 24.0,
+        pitch:   JointState { angle: 45.0,  speed: 0.0 },
+        roll:    JointState { angle: -10.0, speed: 0.0 },
     }));
 
     // ═══ 3. 注册观测变量 ═══
-    // 标量: watch_scalar!
-    watch_scalar!("counter", counter, ReadWrite);
-    watch_scalar!("voltage", voltage, ReadWrite);
-    watch_scalar!("active",  active,  ReadWrite);
 
-    // 结构体: #[derive(Watch)] + register_watch_fields (一行注册, 权限由注解决定)
-    register_watch_fields("motor", motor);
-    register_watch_fields("robot.arm", arm);
-    register_watch_fields("robot.chassis", chassis);
+    // 普通变量: watch_scalar!
+    watch_scalar!("battery", bat_v, ReadWrite);
+    watch_scalar!("loops",   loops, ReadOnly);
+
+    // 非嵌套结构体: watch_struct! — 手动选择字段、精确指定权限
+    watch_struct!("pid", PidGains, pid, {
+        kp: f32 => ReadWrite,
+        ki: f32 => ReadWrite,
+        kd: f32 => ReadOnly,
+    });
+
+    // 嵌套结构体: watch_struct_all! — 平铺所有子字段, 默认 ReadWrite
+    // pitch.* / roll.* 会展开为 arm.pitch.angle, arm.pitch.speed ...
+    watch_struct_all!("arm", RobotArm, arm, {
+        voltage:      f32,
+        pitch.angle:  f32 => ReadOnly,
+        pitch.speed:  f32 => ReadOnly,
+        roll.angle:   f32 => ReadOnly,
+        roll.speed:   f32 => ReadOnly,
+    });
 
     // ═══ 4. 启动 watch 后台任务 ═══
     let watch_cfg = watch_config!();
-    rprintln!("[Demo] RTT Watch 调试工具演示启动");
-    rprintln!("  MCU 遥测: {}Hz  宿主机: {}Hz",
+    rprintln!("[Demo] RTT Watch 启动: MCU {}Hz / Host {}Hz",
         watch_cfg.mcu_freq_hz, watch_cfg.host_freq_hz);
 
     spawner.must_spawn(debug_watch_task(channels.up.1, channels.down.0, watch_cfg));
 
     // ═══ 5. 模拟运行: 周期性修改观测值 ═══
-    let mut tick: u32 = 0;
+    let mut tick: i32 = 0;
 
     loop {
         tick += 1;
 
-        // 计数器自增
-        *counter.borrow_mut() = tick;
+        // 电池电压: 缓慢下降
+        *bat_v.borrow_mut() = 12.60 - (tick as f32) * 0.001;
 
-        // 布尔切换 (每 2 秒)
-        if tick % 40 == 0 {
-            let mut a = active.borrow_mut();
-            *a = !*a;
+        // 循环计数
+        *loops.borrow_mut() = tick;
+
+        // PID 参数: 模拟手动调参
+        let mut p = pid.borrow_mut();
+        if tick % 100 == 0 {
+            p.kp += 0.1;
+            if p.kp > 5.0 { p.kp = 2.5; }
         }
+        drop(p);
 
-        // 电机: RPM 三角波 500..=1500
-        let wave = if (tick / 50) % 2 == 0 {
-            500.0 + (tick % 50) as f32 * 20.0
-        } else {
-            1500.0 - (tick % 50) as f32 * 20.0
-        };
-        motor.borrow_mut().rpm = wave;
-        motor.borrow_mut().current = 0.3 + (tick % 100) as f32 / 100.0;
-        motor.borrow_mut().temperature = 25 + (tick % 30) as u8;
-
-        // 机械臂: 角度摆动 45°..=135°
-        if (tick / 25) % 2 == 0 {
-            arm.borrow_mut().joint_angle = 90.0 + (tick % 25) as f32 * 1.8;
-            arm.borrow_mut().joint_speed = 30.0;
-        } else {
-            arm.borrow_mut().joint_angle = 135.0 - (tick % 25) as f32 * 1.8;
-            arm.borrow_mut().joint_speed = -30.0;
-        }
-
-        // 底盘: 缓慢位移
-        chassis.borrow_mut().x += 0.10;
-        chassis.borrow_mut().y += 0.05;
-
-        // 电压: 微小波动
-        *voltage.borrow_mut() = 3.30 + (tick % 20) as f32 / 100.0;
+        // 机械臂: 周期性摆动
+        let phase = (tick % 200) as f32;
+        let mut a = arm.borrow_mut();
+        a.voltage = 24.0 + (tick % 10) as f32 * 0.1;
+        a.pitch.angle = 45.0 + (phase * 1.8);
+        a.pitch.speed = if phase < 100.0 { 30.0 } else { -30.0 };
+        a.roll.angle  = -10.0 + (phase * 0.9 - 90.0);
+        a.roll.speed  = if phase < 100.0 { -15.0 } else { 15.0 };
+        drop(a);
 
         Timer::after(Duration::from_millis(50)).await;
     }
