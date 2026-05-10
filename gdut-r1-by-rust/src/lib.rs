@@ -5,3 +5,4 @@
 
 pub mod XieFField_Lib;
 pub mod User;
+pub mod debugger;

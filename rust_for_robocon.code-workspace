@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../RTT_DebugTool"
+		}
+	],
+	"settings": {
+		"rust-analyzer.linkedProjects": [
+			"gdut-r1-by-rust/Cargo.toml"
+		]
+	}
+}
