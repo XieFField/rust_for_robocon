@@ -36,6 +36,7 @@ critical-section = "1.2.0"
 embassy-stm32 = { version = "0.6", features = ["defmt", "stm32h723zg", "unstable-pac", "time-driver-any" ]  }
 panic-rtt-target = "0.2.0"
 heapless = "0.9.3"
+rtt-debug-tool-mcu = { path = "../rtt-debug-tool-mcu" }
 
 
 

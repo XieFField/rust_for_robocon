@@ -1,0 +1,11 @@
+F:\MyProjectFlies\RUST_project\STM32\rust_for_robocon\rtt-debug-tool-mcu\target\debug\deps\rtt_target-7ea426d3f62e365a.d: C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\lib.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\debug.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\rtt.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\init.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\print.rs
+
+F:\MyProjectFlies\RUST_project\STM32\rust_for_robocon\rtt-debug-tool-mcu\target\debug\deps\librtt_target-7ea426d3f62e365a.rlib: C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\lib.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\debug.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\rtt.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\init.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\print.rs
+
+F:\MyProjectFlies\RUST_project\STM32\rust_for_robocon\rtt-debug-tool-mcu\target\debug\deps\librtt_target-7ea426d3f62e365a.rmeta: C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\lib.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\debug.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\rtt.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\init.rs C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\print.rs
+
+C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\lib.rs:
+C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\debug.rs:
+C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\rtt.rs:
+C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\init.rs:
+C:\Users\86130\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rtt-target-0.6.2\src\print.rs:

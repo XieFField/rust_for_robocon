@@ -5,4 +5,4 @@
 
 pub mod XieFField_Lib;
 pub mod User;
-pub mod debugger;
+pub use rtt_debug_tool_mcu::Watch;
