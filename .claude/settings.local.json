@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir -p \"f:/MyProjectFlies/RUST_project/STM32/rust_for_robocon/watch-derive/src\")"
+      "Bash(mkdir -p \"f:/MyProjectFlies/RUST_project/STM32/rust_for_robocon/watch-derive/src\")",
+      "Bash(grep -A5 \"pub fn run_native\" \"/c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.31.1/src/lib.rs\")",
+      "Read(//c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.31.1/src/**)",
+      "Bash(cargo check *)"
     ],
     "additionalDirectories": [
       "f:\\MyProjectFlies\\RUST_project\\STM32\\rust_for_robocon\\watch-derive"
