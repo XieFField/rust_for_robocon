@@ -19,3 +19,26 @@ use rtt_debug_tool_mcu::watch_table::register_watch_fields;
 use rtt_debug_tool_mcu::{watch_scalar, watch_config};
 
 #[derive(Watch)]
+struct test1{
+    a: f32,
+    b: i32,
+}
+
+#[embassy_executor::main]
+async fn main(spawner: Spawner) -> !{
+
+    let channels = rtt_init! {
+        up: {
+            0: { size: 1024, name: "Terminal" }
+            1: { size: 1024, name: "Watch" }
+        }
+        down: {
+            0: { size: 128, name: "Command" }
+        }
+    };
+
+
+    loop {
+        
+    }
+}

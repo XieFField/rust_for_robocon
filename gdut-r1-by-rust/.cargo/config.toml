@@ -1,11 +1,11 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32H723ZG"
-# runner = "probe-rs run --probe --protocol swd --speed 1000 --chip STM32H723ZG"
+# 只烧录不复位 — 用 flash.bat 或手动复位启动
+runner = ["probe-rs", "download", "--chip", "STM32H723ZG"]
 [build]
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-runner = "probe-rs run --chip STM32H723ZG"
+runner = ["probe-rs", "download", "--chip", "STM32H723ZG"]
 
 rustflags = [
     # "-C", "link-arg=-Tlink.x",

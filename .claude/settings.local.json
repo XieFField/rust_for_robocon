@@ -4,7 +4,10 @@
       "Bash(mkdir -p \"f:/MyProjectFlies/RUST_project/STM32/rust_for_robocon/watch-derive/src\")",
       "Bash(grep -A5 \"pub fn run_native\" \"/c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.31.1/src/lib.rs\")",
       "Read(//c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.31.1/src/**)",
-      "Bash(cargo check *)"
+      "Bash(cargo check *)",
+      "Bash(grep \"embedded-io\\\\\"\" \"/c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/embassy-stm32-0.6.0/Cargo.toml\")",
+      "Read(//c/Users/86130/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/embassy-stm32-0.6.0/**)",
+      "Bash(grep -n \"启动 UART\\\\|spawn_watch_uart\\\\|impl Send\\\\|^}$\" \"f:/MyProjectFlies/RUST_project/RTT_DebugTool/rtt-debug-tool-mcu/src/watch_task.rs\")"
     ],
     "additionalDirectories": [
       "f:\\MyProjectFlies\\RUST_project\\STM32\\rust_for_robocon\\watch-derive"
