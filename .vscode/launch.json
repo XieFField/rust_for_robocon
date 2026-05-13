@@ -19,7 +19,8 @@
           "rttEnabled": true,
            //"programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/gdut-r1-by-rust" //如果你想调试其他程序，改这里就行了
           //"programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/examples/m3508_control_demo"
-          "programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/examples/rtt_debugtool_demo"
+          //"programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/examples/rtt_debugtool_demo"
+          "programBinary": "gdut-r1-by-rust/target/thumbv7em-none-eabihf/debug/examples/rtt_debugtool_uart_demo"
           //
         }
       ]

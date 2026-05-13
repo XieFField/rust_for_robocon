@@ -26,9 +26,9 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::{bind_interrupts, dma, peripherals};
 
 bind_interrupts!(struct Irqs { 
-    USART1 => usart::InterruptHandler<peripherals::USART1>;
-    DMA1_STREAM0 => dma::InterruptHandler<peripherals::DMA1_CH0>;
-    DMA1_STREAM1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    UART8 => usart::InterruptHandler<peripherals::UART8>;
+    DMA1_STREAM7 => dma::InterruptHandler<peripherals::DMA1_CH7>;
+    DMA2_STREAM2 => dma::InterruptHandler<peripherals::DMA2_CH2>;
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -83,8 +83,8 @@ async fn main(spawner: Spawner) -> ! {
     uart_config.parity = usart::Parity::ParityNone;
     uart_config.stop_bits = usart::StopBits::STOP1;
 
-    let uart = Uart::new(p.USART1,
-        p.PB7, p.PB6, p.DMA1_CH0, p.DMA1_CH1, Irqs, uart_config).unwrap();
+    let uart = Uart::new(p.UART8,
+        p.PE0, p.PE1, p.DMA1_CH7, p.DMA2_CH2, Irqs, uart_config).unwrap();
     // ── 创建 RefCell 实例 ──
     let bat_v = BAT_VOLTAGE.init(RefCell::new(12.60));
     let loops = LOOP_COUNT.init(RefCell::new(0));
